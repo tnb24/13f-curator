@@ -136,14 +136,9 @@ The agent can give a wrong answer to some questions:
 - **No step checks the SQL.** The agent cites the filings that its SQL reads. Nothing
   confirms that the SQL answers the question.
 
-## How I built it
-
-I set the direction and made the design decisions. AI coding agents wrote most of the
-code: Claude Code planned and reviewed the work, and OpenCode wrote most modules.
-
-The challenge organisers supplied `agents/llm.py`, `verify.py`, `filers.csv`,
-`docs/SCHEMA.md`, and the example questions.
-
 ## License
 
 [MIT](LICENSE)
+
+The challenge organisers supplied `agents/llm.py`, `verify.py`, `filers.csv`,
+`docs/SCHEMA.md`, and the example questions.
