@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<edgarSubmission xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <headerData>
+    <filerInfo>
+      <filer>
+        <credentials>
+          <cik>0001501262</cik>
+        </credentials>
+      </filer>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <coverPage>
+      <reportCalendarOrQuarter>06-30-2026</reportCalendarOrQuarter>
+      <filingManager>
+        <name>NOTICE MANAGER LLC</name>
+        <address>
+          <street1>2 MAIN STREET</street1>
+          <city>STATE COLLEGE</city>
+          <state>PA</state>
+          <zipCode>16801</zipCode>
+        </address>
+      </filingManager>
+      <reportType>13F NOTICE</reportType>
+      <form13FFileNumber>028-67890</form13FFileNumber>
+    </coverPage>
+    <summaryPage>
+      <otherIncludedManagersCount>0</otherIncludedManagersCount>
+      <tableEntryTotal/>
+      <tableValueTotal/>
+    </summaryPage>
+  </formData>
+</edgarSubmission>

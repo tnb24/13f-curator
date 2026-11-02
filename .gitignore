@@ -1,0 +1,41 @@
+# Local environment. Never commit credentials.
+.env
+.env.*
+!.env.example
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# EDGAR response cache and the DuckDB file. Large, and the pipeline rebuilds them.
+.cache/
+.cache*/
+
+# Editors and OS
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Backup copies
+*.bak
+*.bak/
+
+# output/ holds the published dataset. Keep it tracked even if a global
+# gitignore excludes data files.
+!output/
+!output/**
+
+# Raw filing XML (about 72 MB). main.py downloads it again on the first run.
+output/filings/

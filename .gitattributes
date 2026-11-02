@@ -1,0 +1,5 @@
+# output/ must survive byte for byte, so the determinism check holds on every OS.
+# Windows with core.autocrlf=true would turn the \n line endings in output/filers.csv
+# into \r\n on checkout.
+output/** -text
+*.parquet -text

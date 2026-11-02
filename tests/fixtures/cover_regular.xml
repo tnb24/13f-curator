@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<edgarSubmission xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <headerData>
+    <filerInfo>
+      <filer>
+        <credentials>
+          <cik>0001350693</cik>
+        </credentials>
+      </filer>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <coverPage>
+      <reportCalendarOrQuarter>03-31-2026</reportCalendarOrQuarter>
+      <filingManager>
+        <name>TEST MANAGER LLC</name>
+        <address>
+          <street1>1 MAIN STREET</street1>
+          <city>STATE COLLEGE</city>
+          <state>PA</state>
+          <zipCode>16801</zipCode>
+        </address>
+      </filingManager>
+      <reportType>13F HOLDINGS REPORT</reportType>
+      <form13FFileNumber>028-12345</form13FFileNumber>
+    </coverPage>
+    <summaryPage>
+      <otherIncludedManagersCount>0</otherIncludedManagersCount>
+      <tableEntryTotal>4</tableEntryTotal>
+      <tableValueTotal>123456</tableValueTotal>
+    </summaryPage>
+  </formData>
+</edgarSubmission>

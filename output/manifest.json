@@ -1,0 +1,1110 @@
+{
+  "run": {
+    "started_at": "2026-08-24T15:14:27Z",
+    "elapsed_seconds": 62.3,
+    "requests": 183,
+    "cache_hits": 21,
+    "cache_misses": 162,
+    "bytes_downloaded": 121426876
+  },
+  "entries": [
+    {
+      "url": "https://data.sec.gov/submissions/CIK0000923093.json",
+      "hit": false,
+      "bytes": 74854,
+      "elapsed_seconds": 0.185
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0000923093.json",
+      "hit": true,
+      "bytes": 74854,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0000934373.json",
+      "hit": false,
+      "bytes": 6862,
+      "elapsed_seconds": 0.126
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001009207.json",
+      "hit": false,
+      "bytes": 37333,
+      "elapsed_seconds": 0.223
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001009207.json",
+      "hit": true,
+      "bytes": 37333,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001011781.json",
+      "hit": false,
+      "bytes": 56419,
+      "elapsed_seconds": 0.335
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001019789.json",
+      "hit": false,
+      "bytes": 2743,
+      "elapsed_seconds": 0.195
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001037389-submissions-001.json",
+      "hit": false,
+      "bytes": 269551,
+      "elapsed_seconds": 0.131
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001037389.json",
+      "hit": false,
+      "bytes": 160138,
+      "elapsed_seconds": 0.092
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001037389.json",
+      "hit": true,
+      "bytes": 160138,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001040273.json",
+      "hit": false,
+      "bytes": 130103,
+      "elapsed_seconds": 0.19
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001040273.json",
+      "hit": true,
+      "bytes": 130103,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001054420.json",
+      "hit": false,
+      "bytes": 18667,
+      "elapsed_seconds": 0.204
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001061165.json",
+      "hit": false,
+      "bytes": 81618,
+      "elapsed_seconds": 0.14
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001061165.json",
+      "hit": true,
+      "bytes": 81618,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001061303.json",
+      "hit": false,
+      "bytes": 1620,
+      "elapsed_seconds": 0.118
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001061768.json",
+      "hit": false,
+      "bytes": 98114,
+      "elapsed_seconds": 0.318
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001061768.json",
+      "hit": true,
+      "bytes": 98114,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001080384.json",
+      "hit": false,
+      "bytes": 1382,
+      "elapsed_seconds": 0.126
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001080384.json",
+      "hit": true,
+      "bytes": 1382,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001103804.json",
+      "hit": false,
+      "bytes": 95237,
+      "elapsed_seconds": 0.292
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001103804.json",
+      "hit": true,
+      "bytes": 95237,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001167483.json",
+      "hit": false,
+      "bytes": 81506,
+      "elapsed_seconds": 0.11
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001167483.json",
+      "hit": true,
+      "bytes": 81506,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001167557-submissions-001.json",
+      "hit": false,
+      "bytes": 27652,
+      "elapsed_seconds": 0.247
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001167557.json",
+      "hit": false,
+      "bytes": 164686,
+      "elapsed_seconds": 0.469
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001167557.json",
+      "hit": true,
+      "bytes": 164686,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001218710.json",
+      "hit": false,
+      "bytes": 72600,
+      "elapsed_seconds": 0.338
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001218710.json",
+      "hit": true,
+      "bytes": 72600,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001248012.json",
+      "hit": false,
+      "bytes": 1372,
+      "elapsed_seconds": 0.155
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001273087.json",
+      "hit": false,
+      "bytes": 154330,
+      "elapsed_seconds": 0.16
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001273087.json",
+      "hit": true,
+      "bytes": 154330,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001297704.json",
+      "hit": false,
+      "bytes": 125757,
+      "elapsed_seconds": 0.125
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001336528.json",
+      "hit": false,
+      "bytes": 118765,
+      "elapsed_seconds": 0.052
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001336528.json",
+      "hit": true,
+      "bytes": 118765,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001350694.json",
+      "hit": false,
+      "bytes": 19381,
+      "elapsed_seconds": 0.199
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001350694.json",
+      "hit": true,
+      "bytes": 19381,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001423053-submissions-001.json",
+      "hit": false,
+      "bytes": 79277,
+      "elapsed_seconds": 0.152
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001423053.json",
+      "hit": false,
+      "bytes": 167016,
+      "elapsed_seconds": 0.178
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001423053.json",
+      "hit": true,
+      "bytes": 167016,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001425157.json",
+      "hit": false,
+      "bytes": 14302,
+      "elapsed_seconds": 0.276
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001441689.json",
+      "hit": false,
+      "bytes": 15103,
+      "elapsed_seconds": 0.333
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001468945.json",
+      "hit": false,
+      "bytes": 1447,
+      "elapsed_seconds": 0.216
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001489933.json",
+      "hit": false,
+      "bytes": 20557,
+      "elapsed_seconds": 0.155
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001489933.json",
+      "hit": true,
+      "bytes": 20557,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001517137.json",
+      "hit": false,
+      "bytes": 151238,
+      "elapsed_seconds": 0.286
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001517137.json",
+      "hit": true,
+      "bytes": 151238,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001603466-submissions-001.json",
+      "hit": false,
+      "bytes": 6495,
+      "elapsed_seconds": 0.187
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001603466.json",
+      "hit": false,
+      "bytes": 159556,
+      "elapsed_seconds": 0.062
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001603466.json",
+      "hit": true,
+      "bytes": 159556,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001637460.json",
+      "hit": false,
+      "bytes": 25822,
+      "elapsed_seconds": 0.22
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001637460.json",
+      "hit": true,
+      "bytes": 25822,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001791786.json",
+      "hit": false,
+      "bytes": 41289,
+      "elapsed_seconds": 0.161
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001791786.json",
+      "hit": true,
+      "bytes": 41289,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0001849894.json",
+      "hit": false,
+      "bytes": 32977,
+      "elapsed_seconds": 0.249
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0002026053.json",
+      "hit": false,
+      "bytes": 11657,
+      "elapsed_seconds": 0.232
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0002045724.json",
+      "hit": false,
+      "bytes": 3787,
+      "elapsed_seconds": 0.073
+    },
+    {
+      "url": "https://data.sec.gov/submissions/CIK0002045724.json",
+      "hit": true,
+      "bytes": 3787,
+      "elapsed_seconds": 0.0
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt",
+      "hit": false,
+      "bytes": 40002136,
+      "elapsed_seconds": 0.882
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1009207/000110465926062472/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.206
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1009207/000110465926062472/infotable.xml",
+      "hit": false,
+      "bytes": 2925259,
+      "elapsed_seconds": 0.204
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1009207/000110465926062472/primary_doc.xml",
+      "hit": false,
+      "bytes": 5324,
+      "elapsed_seconds": 0.095
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1009207/000110465926097217/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.188
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1009207/000110465926097217/infotable.xml",
+      "hit": false,
+      "bytes": 3175234,
+      "elapsed_seconds": 0.214
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1009207/000110465926097217/primary_doc.xml",
+      "hit": false,
+      "bytes": 5277,
+      "elapsed_seconds": 0.234
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1037389/000103738926000033/index.json",
+      "hit": false,
+      "bytes": 681,
+      "elapsed_seconds": 0.057
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1037389/000103738926000033/primary_doc.xml",
+      "hit": false,
+      "bytes": 2015,
+      "elapsed_seconds": 0.157
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1037389/000103738926000033/renaissance13Fq12026_holding.xml",
+      "hit": false,
+      "bytes": 1836709,
+      "elapsed_seconds": 0.207
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1037389/000103738926000059/index.json",
+      "hit": false,
+      "bytes": 681,
+      "elapsed_seconds": 0.156
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1037389/000103738926000059/primary_doc.xml",
+      "hit": false,
+      "bytes": 2020,
+      "elapsed_seconds": 0.165
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1037389/000103738926000059/renaissance13Fq22026_holding.xml",
+      "hit": false,
+      "bytes": 1795507,
+      "elapsed_seconds": 0.232
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1040273/000104027326000002/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.094
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1040273/000104027326000002/infotable.xml",
+      "hit": false,
+      "bytes": 18928,
+      "elapsed_seconds": 0.237
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1040273/000104027326000002/primary_doc.xml",
+      "hit": false,
+      "bytes": 2024,
+      "elapsed_seconds": 0.169
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1040273/000104027326000003/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.191
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1040273/000104027326000003/infotable.xml",
+      "hit": false,
+      "bytes": 24759,
+      "elapsed_seconds": 0.228
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1040273/000104027326000003/primary_doc.xml",
+      "hit": false,
+      "bytes": 2024,
+      "elapsed_seconds": 0.389
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061165/000091957426003439/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.019
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061165/000091957426003439/infotable.xml",
+      "hit": false,
+      "bytes": 17014,
+      "elapsed_seconds": 0.387
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061165/000091957426003439/primary_doc.xml",
+      "hit": false,
+      "bytes": 2193,
+      "elapsed_seconds": 0.303
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061165/000091957426005485/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.032
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061165/000091957426005485/infotable.xml",
+      "hit": false,
+      "bytes": 16158,
+      "elapsed_seconds": 0.19
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061165/000091957426005485/primary_doc.xml",
+      "hit": false,
+      "bytes": 2147,
+      "elapsed_seconds": 0.221
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061768/000106176826000007/BGLLCQ12026.xml",
+      "hit": false,
+      "bytes": 11876,
+      "elapsed_seconds": 0.206
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061768/000106176826000007/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.174
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061768/000106176826000007/primary_doc.xml",
+      "hit": false,
+      "bytes": 1968,
+      "elapsed_seconds": 0.192
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061768/000106176826000010/BGLLCQ22026.xml",
+      "hit": false,
+      "bytes": 12409,
+      "elapsed_seconds": 0.192
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061768/000106176826000010/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.204
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1061768/000106176826000010/primary_doc.xml",
+      "hit": false,
+      "bytes": 1967,
+      "elapsed_seconds": 0.271
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1103804/000110380426000004/MSFS13F033126.XML",
+      "hit": false,
+      "bytes": 42107,
+      "elapsed_seconds": 0.19
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1103804/000110380426000004/index.json",
+      "hit": false,
+      "bytes": 656,
+      "elapsed_seconds": 0.202
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1103804/000110380426000004/primary_doc.xml",
+      "hit": false,
+      "bytes": 2065,
+      "elapsed_seconds": 0.132
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1103804/000110380426000006/Q2202613F.xml",
+      "hit": false,
+      "bytes": 48549,
+      "elapsed_seconds": 0.214
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1103804/000110380426000006/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.196
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1103804/000110380426000006/primary_doc.xml",
+      "hit": false,
+      "bytes": 2065,
+      "elapsed_seconds": 0.246
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167483/000091957426003362/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.143
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167483/000091957426003362/infotable.xml",
+      "hit": false,
+      "bytes": 25399,
+      "elapsed_seconds": 0.243
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167483/000091957426003362/primary_doc.xml",
+      "hit": false,
+      "bytes": 2187,
+      "elapsed_seconds": 0.157
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167483/000091957426005427/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.202
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167483/000091957426005427/infotable.xml",
+      "hit": false,
+      "bytes": 21727,
+      "elapsed_seconds": 0.189
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167483/000091957426005427/primary_doc.xml",
+      "hit": false,
+      "bytes": 2187,
+      "elapsed_seconds": 0.198
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167557/000116755726000115/index.json",
+      "hit": false,
+      "bytes": 663,
+      "elapsed_seconds": 0.219
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167557/000116755726000115/infotable.xml",
+      "hit": false,
+      "bytes": 13148927,
+      "elapsed_seconds": 0.201
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167557/000116755726000115/primary_doc.xml",
+      "hit": false,
+      "bytes": 7412,
+      "elapsed_seconds": 0.032
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167557/000116755726000226/index.json",
+      "hit": false,
+      "bytes": 663,
+      "elapsed_seconds": 0.175
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167557/000116755726000226/infotable.xml",
+      "hit": false,
+      "bytes": 13304701,
+      "elapsed_seconds": 0.219
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1167557/000116755726000226/primary_doc.xml",
+      "hit": false,
+      "bytes": 7412,
+      "elapsed_seconds": 0.044
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1218710/000119312526226359/53979.xml",
+      "hit": false,
+      "bytes": 1455580,
+      "elapsed_seconds": 0.191
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1218710/000119312526226359/index.json",
+      "hit": false,
+      "bytes": 658,
+      "elapsed_seconds": 0.189
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1218710/000119312526226359/primary_doc.xml",
+      "hit": false,
+      "bytes": 2207,
+      "elapsed_seconds": 0.171
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1218710/000119312526351940/57127.xml",
+      "hit": false,
+      "bytes": 1494919,
+      "elapsed_seconds": 0.215
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1218710/000119312526351940/index.json",
+      "hit": false,
+      "bytes": 658,
+      "elapsed_seconds": 0.176
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1218710/000119312526351940/primary_doc.xml",
+      "hit": false,
+      "bytes": 2207,
+      "elapsed_seconds": 0.128
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1273087/000127308726000004/MLP_FIling_20260331.xml",
+      "hit": false,
+      "bytes": 2950975,
+      "elapsed_seconds": 0.226
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1273087/000127308726000004/index.json",
+      "hit": false,
+      "bytes": 672,
+      "elapsed_seconds": 0.175
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1273087/000127308726000004/primary_doc.xml",
+      "hit": false,
+      "bytes": 4038,
+      "elapsed_seconds": 0.049
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1273087/000127308726000007/MLP_Filing_20260630.xml",
+      "hit": false,
+      "bytes": 3048776,
+      "elapsed_seconds": 0.214
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1273087/000127308726000007/index.json",
+      "hit": false,
+      "bytes": 672,
+      "elapsed_seconds": 0.19
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1273087/000127308726000007/primary_doc.xml",
+      "hit": false,
+      "bytes": 4038,
+      "elapsed_seconds": 0.045
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1336528/000117266126002336/index.json",
+      "hit": false,
+      "bytes": 659,
+      "elapsed_seconds": 0.201
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1336528/000117266126002336/infotable.xml",
+      "hit": false,
+      "bytes": 5520,
+      "elapsed_seconds": 0.246
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1336528/000117266126002336/primary_doc.xml",
+      "hit": false,
+      "bytes": 2193,
+      "elapsed_seconds": 0.184
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1336528/000117266126003777/index.json",
+      "hit": false,
+      "bytes": 563,
+      "elapsed_seconds": 0.151
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1336528/000117266126003777/primary_doc.xml",
+      "hit": false,
+      "bytes": 2492,
+      "elapsed_seconds": 0.207
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1350694/000135069426000002/index.json",
+      "hit": false,
+      "bytes": 661,
+      "elapsed_seconds": 0.177
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1350694/000135069426000002/infotable.xml",
+      "hit": false,
+      "bytes": 597030,
+      "elapsed_seconds": 0.212
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1350694/000135069426000002/primary_doc.xml",
+      "hit": false,
+      "bytes": 2073,
+      "elapsed_seconds": 0.168
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1350694/000135069426000003/index.json",
+      "hit": false,
+      "bytes": 661,
+      "elapsed_seconds": 0.198
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1350694/000135069426000003/infotable.xml",
+      "hit": false,
+      "bytes": 599469,
+      "elapsed_seconds": 0.208
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1350694/000135069426000003/primary_doc.xml",
+      "hit": false,
+      "bytes": 2073,
+      "elapsed_seconds": 0.183
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1423053/000110465926062477/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.189
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1423053/000110465926062477/infotable.xml",
+      "hit": false,
+      "bytes": 7845034,
+      "elapsed_seconds": 0.217
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1423053/000110465926062477/primary_doc.xml",
+      "hit": false,
+      "bytes": 2470,
+      "elapsed_seconds": 0.048
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1423053/000110465926097200/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.201
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1423053/000110465926097200/infotable.xml",
+      "hit": false,
+      "bytes": 8131913,
+      "elapsed_seconds": 0.26
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1423053/000110465926097200/primary_doc.xml",
+      "hit": false,
+      "bytes": 2419,
+      "elapsed_seconds": 0.04
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1489933/000117266126002341/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.233
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1489933/000117266126002341/infotable.xml",
+      "hit": false,
+      "bytes": 44603,
+      "elapsed_seconds": 0.17
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1489933/000117266126002341/primary_doc.xml",
+      "hit": false,
+      "bytes": 3003,
+      "elapsed_seconds": 0.172
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1489933/000117266126003786/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.215
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1489933/000117266126003786/infotable.xml",
+      "hit": false,
+      "bytes": 46116,
+      "elapsed_seconds": 0.171
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1489933/000117266126003786/primary_doc.xml",
+      "hit": false,
+      "bytes": 3003,
+      "elapsed_seconds": 0.215
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1517137/000092189526001402/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.202
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1517137/000092189526001402/infotable.xml",
+      "hit": false,
+      "bytes": 13755,
+      "elapsed_seconds": 0.242
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1517137/000092189526001402/primary_doc.xml",
+      "hit": false,
+      "bytes": 3614,
+      "elapsed_seconds": 0.131
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1517137/000092189526002172/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.2
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1517137/000092189526002172/infotable.xml",
+      "hit": false,
+      "bytes": 11648,
+      "elapsed_seconds": 0.189
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1517137/000092189526002172/primary_doc.xml",
+      "hit": false,
+      "bytes": 3567,
+      "elapsed_seconds": 0.208
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1603466/000091957426003476/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.22
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1603466/000091957426003476/infotable.xml",
+      "hit": false,
+      "bytes": 1757137,
+      "elapsed_seconds": 0.196
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1603466/000091957426003476/primary_doc.xml",
+      "hit": false,
+      "bytes": 3134,
+      "elapsed_seconds": 0.101
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1603466/000091957426005520/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.203
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1603466/000091957426005520/infotable.xml",
+      "hit": false,
+      "bytes": 1863057,
+      "elapsed_seconds": 0.213
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1603466/000091957426005520/primary_doc.xml",
+      "hit": false,
+      "bytes": 3080,
+      "elapsed_seconds": 0.058
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1637460/000163746026000002/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.204
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1637460/000163746026000002/infotable.xml",
+      "hit": false,
+      "bytes": 2430265,
+      "elapsed_seconds": 0.245
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1637460/000163746026000002/primary_doc.xml",
+      "hit": false,
+      "bytes": 4895,
+      "elapsed_seconds": 0.024
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1637460/000163746026000003/index.json",
+      "hit": false,
+      "bytes": 662,
+      "elapsed_seconds": 0.19
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1637460/000163746026000003/infotable.xml",
+      "hit": false,
+      "bytes": 2366629,
+      "elapsed_seconds": 0.217
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1637460/000163746026000003/primary_doc.xml",
+      "hit": false,
+      "bytes": 4895,
+      "elapsed_seconds": 0.098
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1791786/000101359426000613/form13fInfoTable.xml",
+      "hit": false,
+      "bytes": 16076,
+      "elapsed_seconds": 0.284
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1791786/000101359426000613/index.json",
+      "hit": false,
+      "bytes": 667,
+      "elapsed_seconds": 0.186
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1791786/000101359426000613/primary_doc.xml",
+      "hit": false,
+      "bytes": 2707,
+      "elapsed_seconds": 0.153
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1791786/000101359426000915/form13fInfoTable.xml",
+      "hit": false,
+      "bytes": 14176,
+      "elapsed_seconds": 0.188
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1791786/000101359426000915/index.json",
+      "hit": false,
+      "bytes": 667,
+      "elapsed_seconds": 0.202
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1791786/000101359426000915/primary_doc.xml",
+      "hit": false,
+      "bytes": 2707,
+      "elapsed_seconds": 0.186
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/index.json",
+      "hit": false,
+      "bytes": 659,
+      "elapsed_seconds": 0.168
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/infotable.xml",
+      "hit": false,
+      "bytes": 8054,
+      "elapsed_seconds": 0.163
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/primary_doc.xml",
+      "hit": false,
+      "bytes": 3679,
+      "elapsed_seconds": 0.169
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2045724/000093583626000418/form13fInfoTable.xml",
+      "hit": false,
+      "bytes": 12561,
+      "elapsed_seconds": 0.208
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2045724/000093583626000418/index.json",
+      "hit": false,
+      "bytes": 667,
+      "elapsed_seconds": 0.19
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2045724/000093583626000418/primary_doc.xml",
+      "hit": false,
+      "bytes": 2115,
+      "elapsed_seconds": 0.19
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2045724/000204572426000008/index.json",
+      "hit": false,
+      "bytes": 663,
+      "elapsed_seconds": 0.171
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2045724/000204572426000008/primary_doc.xml",
+      "hit": false,
+      "bytes": 2081,
+      "elapsed_seconds": 0.189
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/2045724/000204572426000008/salp13fq1xml.xml",
+      "hit": false,
+      "bytes": 23240,
+      "elapsed_seconds": 0.207
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/923093/000090266426002516/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.091
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/923093/000090266426002516/infotable.xml",
+      "hit": false,
+      "bytes": 1833662,
+      "elapsed_seconds": 0.167
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/923093/000090266426002516/primary_doc.xml",
+      "hit": false,
+      "bytes": 2131,
+      "elapsed_seconds": 0.128
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/923093/000090266426003485/index.json",
+      "hit": false,
+      "bytes": 660,
+      "elapsed_seconds": 0.264
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/923093/000090266426003485/infotable.xml",
+      "hit": false,
+      "bytes": 1699912,
+      "elapsed_seconds": 0.133
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/923093/000090266426003485/primary_doc.xml",
+      "hit": false,
+      "bytes": 2084,
+      "elapsed_seconds": 0.098
+    },
+    {
+      "url": "https://www.sec.gov/files/investment/13flist2026q1.txt",
+      "hit": false,
+      "bytes": 1995921,
+      "elapsed_seconds": 0.131
+    },
+    {
+      "url": "https://www.sec.gov/files/investment/13flist2026q2-txt.txt",
+      "hit": false,
+      "bytes": 2051973,
+      "elapsed_seconds": 0.248
+    }
+  ]
+}
