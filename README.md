@@ -21,12 +21,15 @@ August 2026.
 
 ## Results
 
+The pipeline finds all 40 expected filings and fixes the 2 roster CIKs that belong to a different filer.
+The output passes every schema check, and a second run writes identical files from the cache.
+
 | Measure | Value |
 |---|---|
 | Filings | 40 (20 managers × 2 quarters) |
 | Holdings rows | 134,635 |
-| Roster CIKs corrected | 2 of 20 |
-| Rerun output | byte-identical; all 182 requests come from the cache |
+| Wrong roster CIKs fixed | 2 of 20 |
+| Second run | identical files; all 182 requests come from the cache |
 | Schema check (`verify.py`) | 8 of 8 pass |
 | Tests | 67 pass, with no network and no model |
 
@@ -64,48 +67,6 @@ question
 
 - Two guards protect the data: the validator and the read-only connection.
 - Neither guard depends on the prompt. `python scripts/demo_security.py` shows both.
-
-## Problems worth a look
-
-**Two wrong CIKs point at real filers.**
-
-- The roster CIK for Tudor Investment Corp belongs to State of Wisconsin Investment Board.
-- The roster CIK for Situational Awareness LP belongs to ARK Investment Management.
-- Both wrong entities file two 13Fs in scope, so a count check does not find the error.
-- The pipeline matches each roster name, then keeps only candidates that file a 13F in
-  scope.
-- An exact name match is not sufficient. `TUDOR INVESTMENT CORP` files no 13F; the
-  correct entity is `TUDOR INVESTMENT CORP ET AL`.
-- The code contains no hard-coded correction.
-
-**XML namespaces vary.** Filers bind different prefixes to one namespace. The parser
-matches local element names only.
-
-**Missing values stay visible.**
-
-- An empty element becomes null, never zero and never an empty string.
-- When a required field is absent, the parser applies a default and records it in
-  `output/quality_report.json`.
-- The parser never drops a row. On this corpus the quality report is empty.
-
-**Text stays as filed.** Fields such as `put_call` keep the case of the filer. The agent
-compares with `upper()` inside SQL.
-
-**A notice filing has no holdings.**
-
-- Pershing Square filed a 13F-NT notice for 2026 Q2. Its parent company reports the
-  holdings.
-- `bonus1.py` reads the parent from the notice and finds the parent's filing.
-- It maps the notice filer to a sequence number on the parent's cover page.
-- It writes the 14 rows (of 15) that carry that number to
-  `output/bonus_attributed.parquet`.
-
-**CUSIP check.**
-
-- A CUSIP is the 9-character ID of a security.
-- `bonus2.py` parses the fixed-width SEC list and checks 32,176 pairs of filing and
-  CUSIP.
-- Every pair is on the official list for 2026 Q2.
 
 ## Quick start
 
@@ -165,13 +126,15 @@ verify.py        schema checker
 
 ## Known limitations
 
-- Issuer names vary between filers, for example `APPLE INC` and `Apple Inc - US`.
-  The agent filters on one spelling, so a total can miss rows. A fix: resolve the
-  name to CUSIPs, then filter on CUSIP.
-- The agent does not separate share rows from option rows unless the question asks.
-- A question about "all of 2026" passes the scope check. The agent then sums Q1 and Q2.
-- `sources` lists the filings that the SQL returns. No check confirms that the SQL
-  answers the question.
+The agent can give a wrong answer to some questions:
+
+- **One company has many names.** Filers spell one company in different ways, for
+  example `APPLE INC` and `Apple Inc - US`. A question about Apple can miss the rows
+  with another spelling.
+- **Shares and options share one table.** A row holds either shares or an option on
+  shares. The agent includes both, unless the question asks for one type.
+- **No step checks the SQL.** The agent cites the filings that its SQL reads. Nothing
+  confirms that the SQL answers the question.
 
 ## How I built it
 
@@ -183,5 +146,4 @@ The challenge organisers supplied `agents/llm.py`, `verify.py`, `filers.csv`,
 
 ## License
 
-MIT for my code. See [LICENSE](LICENSE). The files from the challenge organisers
-stay under their terms.
+[MIT](LICENSE)
