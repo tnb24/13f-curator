@@ -1,0 +1,13 @@
+# The build context needs the code and the published tables, nothing else.
+.git
+.venv
+.cache
+.env
+.env.*
+**/__pycache__
+.pytest_cache
+.ruff_cache
+output/filings
+tests
+docs
+evals/results

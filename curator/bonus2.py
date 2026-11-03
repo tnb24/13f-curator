@@ -4,18 +4,32 @@ Every unmatched value carries a label and the evidence behind it.
 
 The official list is fixed width. It carries no header and no delimiter, and an
 issuer name holds spaces, so every field comes from a character slice.
+
+The stage works on columns. Arrow kernels slice the official list, match each
+(filing, CUSIP) pair against it, and render the report as CSV. Python code runs
+once per unmatched pair only. `parse_official` and `normalise` are the reference
+rules: a body or a column outside printable ASCII goes through them, and the
+tests compare both paths.
 """
 
 from __future__ import annotations
 
 import csv
+import io
 import os
 import sys
 import tempfile
+from collections import Counter
+from collections.abc import Container
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
+
 from curator.cache import Cache
+from curator.parse import ParsedDataset
 
 _Q2_URL = "https://www.sec.gov/files/investment/13flist2026q2-txt.txt"
 # The Q1 file does not follow the Q2 naming pattern. `13flist2026q1-txt.txt`
@@ -44,6 +58,21 @@ _FIELDS = [
     "rows",
     "assessment",
 ]
+
+OFFICIAL_SCHEMA = pa.schema([
+    ("cusip", pa.string()),
+    ("option_marker", pa.string()),
+    ("issuer", pa.string()),
+    ("class", pa.string()),
+    ("added_this_quarter", pa.bool_()),
+])
+
+# On printable ASCII text, the only whitespace is the space, Python's `upper`
+# changes a-z only, and one byte is one character. Each Arrow kernel below then
+# gives exactly the result of the Python rule that it replaces.
+_PRINTABLE = r"^[\x20-\x7e]*$"
+# Python's csv module quotes a field that holds one of these characters.
+_CSV_SPECIAL = '[",\r\n]'
 
 
 def normalise(value: str | None) -> str:
@@ -89,7 +118,10 @@ def check_digit_ok(cusip: str) -> bool | None:
 
 
 def parse_official(body: str) -> dict[str, dict[str, Any]]:
-    """Parse the fixed-width official list into a map keyed by CUSIP."""
+    """Parse the fixed-width official list into a map keyed by CUSIP.
+
+    This is the reference rule. `official_table` gives the same rows.
+    """
     entries: dict[str, dict[str, Any]] = {}
     for line in body.splitlines():
         if len(line) < _MIN_LINE or not line.strip():
@@ -114,7 +146,86 @@ def parse_official(body: str) -> dict[str, dict[str, Any]]:
     return entries
 
 
-def _assess(cusip: str, q1: dict[str, dict[str, Any]]) -> str:
+def _plain_lines(body: bytes) -> pa.StringArray | None:
+    """Split a body of printable ASCII lines into an Arrow array, or return None.
+
+    On such a body, a split on newline bytes gives what `str.splitlines` gives.
+    """
+    raw = np.frombuffer(body, np.uint8)
+    newline = raw == 0x0A
+    if not np.all(newline | ((raw >= 0x20) & (raw <= 0x7E))):
+        return None
+    ends = np.flatnonzero(newline)
+    starts = np.concatenate(([0], ends + 1))
+    if starts[-1] < len(raw):
+        ends = np.append(ends, len(raw))  # the last line has no newline
+    else:
+        starts = starts[:-1]  # splitlines gives no empty line after the last newline
+    offsets = np.zeros(len(starts) + 1, np.int32)
+    np.cumsum(ends - starts, out=offsets[1:])
+    data = raw[~newline]
+    return pa.StringArray.from_buffers(len(starts), pa.py_buffer(offsets), pa.py_buffer(data))
+
+
+def _slice(lines: pa.Array, field: slice) -> pa.Array:
+    return pc.utf8_slice_codeunits(lines, field.start, field.stop)
+
+
+def _strip(values: pa.Array) -> pa.Array:
+    return pc.utf8_trim(values, " ")
+
+
+def _ascii_normalise(values: pa.Array) -> pa.Array:
+    no_space = pc.replace_substring(values, " ", "")
+    return pc.ascii_upper(pc.replace_substring(no_space, "-", ""))
+
+
+def official_table(body: bytes) -> pa.Table:
+    """Parse the fixed-width official list into a table, one row per CUSIP.
+
+    The rows are the values of `parse_official`, in the same order: file order,
+    and the first line for a CUSIP wins.
+    """
+    lines = _plain_lines(body)
+    if lines is None:
+        entries = parse_official(body.decode("latin-1"))
+        return pa.Table.from_pylist(list(entries.values()), schema=OFFICIAL_SCHEMA)
+
+    lines = lines.filter(pc.greater_equal(pc.utf8_length(lines), _MIN_LINE))
+    # A blank line has an empty CUSIP, so this filter also drops blank lines.
+    cusip = _ascii_normalise(_slice(lines, _CUSIP))
+    keep = pc.not_equal(cusip, "")
+    lines, cusip = lines.filter(keep), cusip.filter(keep)
+
+    codes = pc.dictionary_encode(cusip).indices.to_numpy()
+    _, first = np.unique(codes, return_index=True)
+    first = pa.array(np.sort(first))
+    lines, cusip = lines.take(first), cusip.take(first)
+
+    class_text = _strip(_slice(lines, _CLASS))
+    added = pc.ends_with(class_text, _ADDED_FLAG)
+    flag_removed = _strip(pc.utf8_slice_codeunits(class_text, 0, -len(_ADDED_FLAG)))
+    return pa.table(
+        [
+            cusip,
+            _strip(_slice(lines, _OPTION)),
+            _strip(_slice(lines, _ISSUER)),
+            pc.if_else(added, flag_removed, class_text),
+            added,
+        ],
+        schema=OFFICIAL_SCHEMA,
+    )
+
+
+def normalise_column(values: pa.Array) -> pa.Array:
+    """Apply `normalise` to each value of a string column. A null becomes ""."""
+    values = pc.fill_null(values, "")
+    if pc.all(pc.match_substring_regex(values, _PRINTABLE)).as_py():
+        return _ascii_normalise(values)
+    return pa.array([normalise(value) for value in values.to_pylist()], pa.string())
+
+
+def _assess(cusip: str, q1: Container[str]) -> str:
     """Apply the four assessment rules in order."""
     if check_digit_ok(cusip) is False:
         return "LIKELY_FILER_ERROR"
@@ -125,96 +236,131 @@ def _assess(cusip: str, q1: dict[str, dict[str, Any]]) -> str:
     return "UNRESOLVED"
 
 
-def _write_csv(rows: list[dict[str, Any]], path: Path) -> None:
-    """Write the report with \\n line endings, through a temporary file."""
+def _csv_field(values: pa.Array) -> pa.Array:
+    """Render one column as `csv.writer` renders each value of it."""
+    if pa.types.is_boolean(values.type):
+        return pc.fill_null(pc.if_else(values, "True", "False"), "")
+    if not pa.types.is_string(values.type):
+        return pc.fill_null(pc.cast(values, pa.string()), "")
+    values = pc.fill_null(values, "")
+    special = pc.match_substring_regex(values, _CSV_SPECIAL)
+    if not pc.any(special).as_py():
+        return values
+    escaped = pc.replace_substring(values, '"', '""')
+    return pc.if_else(special, pc.binary_join_element_wise('"', escaped, '"', ""), values)
+
+
+def csv_bytes(table: pa.Table) -> bytes:
+    """Render a table as `csv.writer(lineterminator="\\n")` renders its rows.
+
+    Each line is a join of the rendered fields. One string array then holds
+    every line, so its data buffer is the CSV body.
+    """
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(table.column_names)
+    # Arrow and Python differ when formatting floats, timestamps and nested
+    # values. The report uses only strings, integers and booleans; preserve
+    # csv.writer semantics for other callers without weakening that hot path.
+    if any(not (pa.types.is_string(c.type) or pa.types.is_integer(c.type)
+                or pa.types.is_boolean(c.type) or pa.types.is_null(c.type))
+           for c in table.columns):
+        writer.writerows(zip(*(c.to_pylist() for c in table.columns), strict=True))
+        return stream.getvalue().encode("utf-8")
+    header = stream.getvalue()
+    if table.num_rows == 0:
+        return header.encode("utf-8")
+    fields = [_csv_field(column.combine_chunks()) for column in table.columns]
+    if len(fields) == 1:
+        # csv.writer distinguishes a single empty field from an empty record.
+        fields[0] = pc.if_else(pc.equal(fields[0], ""), '""', fields[0])
+    lines = pc.binary_join_element_wise(*fields, ",")
+    lines = pc.binary_join_element_wise(lines, "", "\n")
+    offsets = np.frombuffer(lines.buffers()[1], np.int32, len(lines) + 1, lines.offset * 4)
+    body = memoryview(lines.buffers()[2])[offsets[0]:offsets[-1]]
+    return header.encode("utf-8") + bytes(body)
+
+
+def _write_bytes(data: bytes, path: Path) -> None:
+    """Write through a temporary file beside the target, then rename into place."""
     handle, temp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     os.close(handle)
     temp = Path(temp_name)
     try:
-        with temp.open("w", encoding="utf-8", newline="") as stream:
-            writer = csv.DictWriter(
-                stream, fieldnames=_FIELDS, lineterminator="\n"
-            )
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
+        temp.write_bytes(data)
         os.replace(temp, path)
     finally:
         if temp.exists():
             temp.unlink()
 
 
-def run_bonus2(dataset, cache: Cache, output: Path) -> None:
+def run_bonus2(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     """Check every 2026 Q2 CUSIP against the official 13F list."""
     output = Path(output)
 
-    q2 = parse_official(cache.get(_Q2_URL).decode("latin-1"))
-    q1 = parse_official(cache.get(_Q1_URL).decode("latin-1"))
+    q2 = official_table(cache.get(_Q2_URL))
+    q1 = official_table(cache.get(_Q1_URL))
     print(
-        f"curator.bonus2: official list holds {len(q2)} Q2 CUSIPs "
-        f"and {len(q1)} Q1 CUSIPs",
+        f"curator.bonus2: official list holds {q2.num_rows} Q2 CUSIPs "
+        f"and {q1.num_rows} Q1 CUSIPs",
         file=sys.stderr,
     )
-    for sample in list(q2.values())[:5]:
+    for sample in q2.slice(0, 5).to_pylist():
         print(f"curator.bonus2:   sample {sample}", file=sys.stderr)
 
-    names = {
-        str(f["accession_number"]): str(f["fund_name"]) for f in dataset.filings
-    }
+    # One row per (filing, stored CUSIP) pair, sorted. use_threads=False keeps
+    # the aggregation ordered, so "first" is the first row in source order.
+    holdings = dataset.holdings
+    quarter = holdings.filter(pc.equal(holdings["report_quarter"], _QUARTER))
+    pairs = (
+        quarter.group_by(["accession_number", "cusip"], use_threads=False)
+        .aggregate([("cik", "first"), ("name_of_issuer", "first"), ([], "count_all")])
+        .sort_by([("accession_number", "ascending"), ("cusip", "ascending")])
+    )
+    rows = pairs["count_all"].combine_chunks()
+    key = normalise_column(pairs["cusip"].combine_chunks())
 
     # Rule out our own error before any comparison starts.
-    quarter_rows = [h for h in dataset.holdings if str(h["report_quarter"]) == _QUARTER]
-    bad_length = sum(1 for h in quarter_rows if len(normalise(h["cusip"])) != 9)
+    bad_length = pc.sum(pc.if_else(pc.not_equal(pc.utf8_length(key), 9), rows, 0)).as_py()
     print(
-        f"curator.bonus2: {len(quarter_rows)} holdings in {_QUARTER}; "
-        f"{bad_length} fail the 9-character check",
+        f"curator.bonus2: {quarter.num_rows} holdings in {_QUARTER}; "
+        f"{bad_length or 0} fail the 9-character check",
         file=sys.stderr,
     )
 
-    pairs: dict[tuple[str, str], dict[str, Any]] = {}
-    for holding in quarter_rows:
-        accession = str(holding["accession_number"])
-        stored = str(holding["cusip"])
-        key = (accession, stored)
-        entry = pairs.get(key)
-        if entry is None:
-            pairs[key] = {
-                "accession_number": accession,
-                "cik": str(holding["cik"]),
-                "fund_name": names.get(accession, ""),
-                "cusip": stored,
-                "issuer_from_filing": str(holding["name_of_issuer"]),
-                "rows": 1,
-            }
-        else:
-            entry["rows"] += 1
+    found = pc.index_in(key, value_set=q2["cusip"])
+    on_list = pc.is_valid(found)
+    unmatched = np.flatnonzero(~on_list.to_numpy(zero_copy_only=False))
+    q1_cusips = frozenset(q1["cusip"].to_pylist()) if len(unmatched) else frozenset()
+    labels = [_assess(cusip, q1_cusips) for cusip in key.take(unmatched).to_pylist()]
+    assessment = pc.replace_with_mask(
+        pa.nulls(len(key), pa.string()), pc.invert(on_list), pa.array(labels, pa.string()))
 
-    report: list[dict[str, Any]] = []
-    labels: dict[str, int] = {}
-    matched = 0
-    for entry in pairs.values():
-        key = normalise(entry["cusip"])
-        official = q2.get(key)
-        if official is not None:
-            matched += 1
-            entry["on_official_list"] = True
-            entry["issuer_from_list"] = official["issuer"]
-            entry["assessment"] = ""
-        else:
-            label = _assess(key, q1)
-            labels[label] = labels.get(label, 0) + 1
-            entry["on_official_list"] = False
-            entry["issuer_from_list"] = ""
-            entry["assessment"] = label
-        report.append(entry)
+    # Accession numbers are unique in filings: verify.py checks the key.
+    filings = dataset.filings
+    fund = filings["fund_name"].take(
+        pc.index_in(pairs["accession_number"], value_set=filings["accession_number"]))
+    report = pa.table(
+        [
+            pairs["accession_number"],
+            pairs["cik_first"],
+            fund,
+            pairs["cusip"],
+            on_list,
+            pairs["name_of_issuer_first"],
+            q2["issuer"].take(found),
+            rows,
+            pc.fill_null(assessment, ""),
+        ],
+        names=_FIELDS,
+    )
+    _write_bytes(csv_bytes(report), output / "bonus_cusip_validation.csv")
 
-    report.sort(key=lambda row: (row["accession_number"], row["cusip"]))
-    _write_csv(report, output / "bonus_cusip_validation.csv")
-
+    matched = report.num_rows - len(unmatched)
     print(
-        f"curator.bonus2: {len(report)} pairs; {matched} matched, "
-        f"{len(report) - matched} unmatched",
+        f"curator.bonus2: {report.num_rows} pairs; {matched} matched, "
+        f"{len(unmatched)} unmatched",
         file=sys.stderr,
     )
-    for label in sorted(labels):
-        print(f"curator.bonus2:   {label}: {labels[label]}", file=sys.stderr)
+    for label, count in sorted(Counter(labels).items()):
+        print(f"curator.bonus2:   {label}: {count}", file=sys.stderr)

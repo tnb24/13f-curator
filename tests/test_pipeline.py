@@ -1,124 +1,147 @@
-"""End-to-end test over canned bodies: discover, download, parse, write.
+"""The whole pipeline, end to end, over the synthetic EDGAR in tests/world.py.
 
-The fake cache serves a submissions payload, two archive indexes, and four
-small XML documents. The run touches no network and writes only into
-``tmp_path``. It exercises the real discover, download, parse, and write
-code paths and checks the written Parquet against the schema contract.
+No test here touches the network. Each run writes into tmp_path only.
 """
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
-from datetime import date, datetime
 from pathlib import Path
 
 import pyarrow.parquet as pq
+import pytest
 
-from curator.cache import Cache  # noqa: F401  (interface reference)
-from curator.cik import FilerRecord
-from curator.discover import discover
-from curator.download import download
-from curator.parse import ParsedDataset, QualityReport, parse_all
-from curator.write import FILINGS_SCHEMA, HOLDINGS_SCHEMA, write_parquet
+from curator.pipeline import run
+from curator.schema import ATTRIBUTED_SCHEMA, FILINGS_SCHEMA, HOLDINGS_SCHEMA
+from tests import world
 
-FIXTURES = Path(__file__).parent / "fixtures"
-
-_CIK = "0001350693"
-_HR_ACC = "0001350693-26-000001"
-_NT_ACC = "0001350693-26-000002"
-_ARCHIVE = "https://www.sec.gov/Archives/edgar/data/1350693/"
-_SUBMISSIONS_URL = f"https://data.sec.gov/submissions/CIK{int(_CIK):010}.json"
-
-
-class FakeCache:
-    """Return canned bodies by URL. Raise KeyError when no body exists."""
-
-    def __init__(self, root: Path, bodies: dict[str, bytes]) -> None:
-        self.root = Path(root)
-        self._bodies = bodies
-
-    def get(self, url: str) -> bytes:
-        return self._bodies[url]
+OUTPUTS = (
+    "filings.parquet",
+    "holdings.parquet",
+    "bonus_attributed.parquet",
+    "bonus_cusip_validation.csv",
+    "filers.csv",
+    "quality_report.json",
+)
 
 
-def _index(names: list[str]) -> bytes:
-    return json.dumps({"directory": {"item": [{"name": name} for name in names]}}).encode(
-        "utf-8"
+def _run(root: Path, name: str, cache: Path | None = None, workers: int = 1):
+    source = world.FakeSource(world.bodies())
+    output = root / name
+    run(
+        "Test User test@example.com",
+        output,
+        cache_dir=cache or root / f"{name}-cache",
+        fetcher=source,
+        roster=world.write_roster(root),
+        workers=workers,
     )
+    return output, source
 
 
-def _bodies() -> dict[str, bytes]:
-    submissions = {
-        "name": "TEST MANAGER LLC",
-        "filings": {
-            "recent": {
-                "accessionNumber": [_HR_ACC, _NT_ACC],
-                "form": ["13F-HR", "13F-NT"],
-                "reportDate": ["2026-03-31", "2026-06-30"],
-                "filingDate": ["2026-05-15", "2026-08-03"],
-                "primaryDocument": ["cover.xml", "notice_cover.xml"],
-            }
-        },
-    }
-    cover = (FIXTURES / "cover_regular.xml").read_bytes()
-    notice = (FIXTURES / "cover_notice.xml").read_bytes()
-    info_table = (FIXTURES / "info_prefixed.xml").read_bytes()
-    return {
-        _SUBMISSIONS_URL: json.dumps(submissions).encode("utf-8"),
-        _ARCHIVE + f"{_HR_ACC.replace('-', '')}/index.json": _index(
-            ["cover.xml", "infotable.xml"]
-        ),
-        _ARCHIVE + f"{_HR_ACC.replace('-', '')}/cover.xml": cover,
-        _ARCHIVE + f"{_HR_ACC.replace('-', '')}/infotable.xml": info_table,
-        _ARCHIVE + f"{_NT_ACC.replace('-', '')}/index.json": _index(["notice_cover.xml"]),
-        _ARCHIVE + f"{_NT_ACC.replace('-', '')}/notice_cover.xml": notice,
+def _digests(directory: Path) -> dict[str, str]:
+    return {name: hashlib.sha256((directory / name).read_bytes()).hexdigest() for name in OUTPUTS}
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory):
+    root = tmp_path_factory.mktemp("pipeline")
+    output, source = _run(root, "first")
+    return root, output, source
+
+
+def test_every_table_matches_its_schema(built) -> None:
+    _, output, _ = built
+    assert pq.read_schema(output / "filings.parquet").equals(FILINGS_SCHEMA)
+    assert pq.read_schema(output / "holdings.parquet").equals(HOLDINGS_SCHEMA)
+    assert pq.read_schema(output / "bonus_attributed.parquet").equals(ATTRIBUTED_SCHEMA)
+
+
+def test_a_wrong_roster_cik_is_corrected(built) -> None:
+    _, output, _ = built
+    with (output / "filers.csv").open(newline="") as handle:
+        rows = {row["fund_name"]: row for row in csv.DictReader(handle)}
+    assert rows["Alpha Capital LLC"]["cik_source"] == "given"
+    # The roster says 1000099. Two lookup entries share the name, and only
+    # 1000002 filed a 13F, so the /ADV entry 1000098 must lose.
+    assert rows["Beta Partners LP"] == {
+        "fund_name": "Beta Partners LP", "cik": "1000002", "cik_source": "corrected",
     }
 
 
-def _filer() -> FilerRecord:
-    return FilerRecord(
-        fund_name="TEST FUND LP",
-        cik=_CIK,
-        cik_source="given",
-        edgar_name="TEST MANAGER LLC",
-    )
-
-
-def test_pipeline_runs_from_submissions_to_parquet(tmp_path):
-    cache = FakeCache(tmp_path, _bodies())
-
-    refs = discover([_filer()], cache)
-    assert [(ref.accession, ref.form) for ref in refs] == [
-        (_HR_ACC, "13F-HR"),
-        (_NT_ACC, "13F-NT"),
+def test_filings_hold_every_quarter_and_the_notice(built) -> None:
+    _, output, _ = built
+    filings = pq.read_table(output / "filings.parquet").to_pylist()
+    assert [(f["fund_name"], f["report_quarter"], f["form_type"]) for f in filings] == [
+        ("Alpha Capital LLC", "2026Q1", "13F-HR"),
+        ("Alpha Capital LLC", "2026Q2", "13F-HR"),
+        ("Beta Partners LP", "2026Q1", "13F-HR"),
+        ("Beta Partners LP", "2026Q2", "13F-HR"),
+        ("Gamma Advisors Inc", "2026Q1", "13F-HR"),
+        ("Gamma Advisors Inc", "2026Q2", "13F-NT"),
     ]
+    notice = filings[-1]
+    assert notice["table_entry_total"] is None
+    assert notice["report_type"] == "13F NOTICE"
 
-    docs = download(refs, cache, tmp_path / "filings")
-    assert len(docs) == 2
 
-    quality = QualityReport()
-    dataset: ParsedDataset = parse_all(docs, quality)
-    # Both fixtures are clean: no anomaly, no substitution.
-    assert quality.entries == []
-    assert len(dataset.filings) == 2
-    assert len(dataset.holdings) == 1
+def test_holdings_keep_filing_order_then_source_order(built) -> None:
+    _, output, _ = built
+    holdings = pq.read_table(output / "holdings.parquet").to_pylist()
+    assert len(holdings) == 11
+    alpha_q2 = [h for h in holdings if h["accession_number"] == "0001000001-26-000002"]
+    assert [(h["cusip"], h["put_call"]) for h in alpha_q2] == [
+        ("037833100", None), ("037833100", "Call"), ("000360206", None),
+    ]
+    # The prefixed namespace (ns1:) parses exactly like the default one.
+    assert alpha_q2[0]["name_of_issuer"] == "APPLE INC"
+    assert alpha_q2[0]["voting_sole"] == 12
 
-    out_dir = tmp_path / "output"
-    out_dir.mkdir()
-    write_parquet(dataset, out_dir)
 
-    filings = pq.read_table(out_dir / "filings.parquet")
-    holdings = pq.read_table(out_dir / "holdings.parquet")
-    assert filings.schema.equals(FILINGS_SCHEMA, check_metadata=False)
-    assert holdings.schema.equals(HOLDINGS_SCHEMA, check_metadata=False)
-    assert filings.num_rows == 2
-    assert holdings.num_rows == 1
+def test_bonus1_attributes_whole_sequence_tokens_only(built) -> None:
+    _, output, _ = built
+    rows = pq.read_table(output / "bonus_attributed.parquet").to_pylist()
+    # Sequence 1 matches "1" and "2, 1". It must not match "11".
+    assert [(r["name_of_issuer"], r["other_manager"]) for r in rows] == [
+        ("APPLE INC", "1"), ("ACME WIDGET CO", "2, 1"),
+    ]
+    assert {r["attributed_to_cik"] for r in rows} == {"0001000003"}
+    # The parent is not on the roster, so its documents stay out of output/filings.
+    assert not (output / "filings" / "1000004").exists()
 
-    filing_rows = filings.to_pylist()
-    holding_rows = holdings.to_pylist()
-    notice_row = next(row for row in filing_rows if row["form_type"] == "13F-NT")
-    assert notice_row["table_entry_total"] is None
-    report = next(row for row in filing_rows if row["form_type"] == "13F-HR")
-    assert report["report_period"] == date(2026, 3, 31)
-    assert report["report_quarter"] == "2026Q1"
-    assert holding_rows[0]["accession_number"] == report["accession_number"]
+
+def test_bonus2_labels_every_unmatched_cusip(built) -> None:
+    _, output, _ = built
+    with (output / "bonus_cusip_validation.csv").open(newline="") as handle:
+        rows = {row["cusip"]: row for row in csv.DictReader(handle)}
+    assert rows["037833100"]["on_official_list"] == "True"
+    assert rows["037833100"]["rows"] == "2"  # the share row and the call row
+    assert rows["037833101"]["assessment"] == "LIKELY_FILER_ERROR"
+    assert rows["123456782"]["assessment"] == "TIMING"
+    assert rows["G3922B107"]["assessment"] == "CINS_FOREIGN"
+
+
+def test_a_second_run_reads_every_body_from_the_cache(tmp_path) -> None:
+    cache = tmp_path / "cache"
+    first, source = _run(tmp_path, "first", cache)
+    second, again = _run(tmp_path, "second", cache)
+    assert source.requested
+    assert again.requested == []
+    assert _digests(first) == _digests(second)
+    manifest = json.loads((second / "manifest.json").read_text(encoding="utf-8"))["run"]
+    assert manifest["cache_misses"] == 0
+    assert manifest["requests"] == manifest["cache_hits"] > 0
+
+
+def test_parallel_parse_writes_the_same_bytes(tmp_path) -> None:
+    """The process pool must not change a byte: results return in input order."""
+    serial, _ = _run(tmp_path, "serial", workers=1)
+    parallel, _ = _run(tmp_path, "parallel", workers=2)
+    assert _digests(serial) == _digests(parallel)
+
+
+def test_stdout_stays_empty(tmp_path, capsys) -> None:
+    _run(tmp_path, "quiet")
+    assert capsys.readouterr().out == ""

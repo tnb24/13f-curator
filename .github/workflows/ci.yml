@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux starts the parse workers with fork, Windows with spawn.
+        os: [ubuntu-latest, windows-latest]
+    env:
+      LLM_MODE: mock
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: python -m pytest -q
+      - run: python verify.py
+      - run: python scripts/demo_security.py
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t curator .
+      - run: docker run --rm curator --help
+      - run: docker run --rm --entrypoint python curator scripts/demo_security.py
+      - name: the agent answers an out-of-scope question with no model
+        run: |
+          out=$(docker run --rm -e LLM_MODE=mock --entrypoint python curator \
+            -m agents.answer "What did Citadel hold in 2026 Q3?")
+          test "$out" = '{"answer": null, "unit": "NONE", "sources": []}'

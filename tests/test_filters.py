@@ -6,8 +6,8 @@ filter, ``_in_scope``. No cache, no network, no re-implemented filter.
 
 from __future__ import annotations
 
-from curator.cik import FilerRecord
 from curator.discover import _in_scope
+from curator.records import FilerRecord
 
 _FILER = FilerRecord(
     fund_name="TEST FUND LP",

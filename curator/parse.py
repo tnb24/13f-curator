@@ -1,4 +1,4 @@
-"""XML parser: turn each filing into one filing record and its holding rows.
+"""XML parser: turn each filing into one filing record and a holdings table.
 
 Filers bind three different prefixes to one namespace URI. Every lookup in
 this module matches the local name only, so the prefix choice never matters.
@@ -11,25 +11,42 @@ substitution and every anomaly in a QualityReport and continues.
 from __future__ import annotations
 
 import json
+from concurrent.futures import Executor
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 from lxml import etree
 
-from curator.download import FilingDocs
+from curator.records import FilingDocs
+from curator.schema import FILINGS_SCHEMA, HOLDINGS_SCHEMA
 
 _COVER_ROOT = "edgarSubmission"
 _INFO_ROOT = "informationTable"
 _ROW = "infoTable"
 
+# The XML comes from third parties. The parser resolves no declared entity and
+# opens no network connection. The five predefined entities still decode.
+_PARSER = etree.XMLParser(resolve_entities=False, no_network=True)
+
+
+def _parse_xml(path: Path):
+    """Return the root element of one stored XML document."""
+    return etree.parse(str(path), _PARSER).getroot()
+
 
 def _local_name(element) -> str | None:
-    """Return the local name of one element, or None for a comment or PI."""
-    if not isinstance(element.tag, str):
+    """Return the local name of one element, or None for a comment or PI.
+
+    lxml stores a namespaced tag as `{uri}name`. A string split is about ten
+    times faster than `etree.QName`, and the parser calls this once per element.
+    """
+    tag = element.tag
+    if not isinstance(tag, str):
         return None
-    return etree.QName(element).localname
+    return tag.rpartition("}")[2]
 
 
 def _child_map(parent) -> dict[str, Any]:
@@ -120,45 +137,79 @@ def _entry_sort_key(entry: dict[str, Any]) -> tuple:
 
 @dataclass(frozen=True)
 class ParsedFiling:
-    """One parsed filing: its record and the holdings it carries."""
+    """One parsed filing: its record and its holdings, in source order."""
 
     filing: dict[str, Any]
-    holdings: list[dict[str, Any]]
+    holdings: pa.Table  # HOLDINGS_SCHEMA
 
 
 @dataclass(frozen=True)
 class ParsedDataset:
-    """The whole corpus: filings sorted, holdings in their filing's order."""
+    """The whole corpus as two tables.
 
-    filings: list[dict[str, Any]]
-    holdings: list[dict[str, Any]]
+    Filings sort on cik, report_period, accession_number. Holdings follow
+    their filing and keep source order inside it.
+    """
+
+    filings: pa.Table  # FILINGS_SCHEMA
+    holdings: pa.Table  # HOLDINGS_SCHEMA
 
 
 def parse_filing(docs: FilingDocs, quality: QualityReport) -> ParsedFiling:
-    """Parse one stored filing into its record and its holding rows."""
+    """Parse one stored filing into its record and its holdings table."""
     filing = _parse_cover(docs, quality)
     holdings = _parse_rows(docs, filing, quality)
     return ParsedFiling(filing=filing, holdings=holdings)
 
 
-def parse_all(docs: list[FilingDocs], quality: QualityReport) -> ParsedDataset:
-    """Parse every filing. Sort filings by cik, report_period, accession.
+def warm_up() -> None:
+    """Prepare one worker process. The pipeline calls this once per worker.
 
-    Holdings follow their filing and keep source order.
+    Unpickling this function imports the module, and so lxml and pyarrow. The
+    first Arrow array in a process also loads pyarrow's pandas shim when pandas
+    is installed. Both costs fall here, while the main process still verifies
+    CIKs, and not inside the first parse task.
     """
-    parsed = [parse_filing(doc, quality) for doc in docs]
-    order = sorted(
-        range(len(parsed)),
-        key=lambda i: (
-            parsed[i].filing["cik"],
-            parsed[i].filing["report_period"],
-            parsed[i].filing["accession_number"],
-        ),
+    pa.array([], pa.string())
+
+
+def parse_task(docs: FilingDocs) -> tuple[ParsedFiling, list[dict[str, Any]]]:
+    """Parse one filing. The quality entries travel back with the result."""
+    quality = QualityReport()
+    return parse_filing(docs, quality), quality.entries
+
+
+def parse_all(
+    docs: list[FilingDocs], quality: QualityReport, pool: Executor | None = None
+) -> ParsedDataset:
+    """Parse every filing, on `pool` when one is given.
+
+    Each filing is independent, so each one is a task. lxml creates one Python
+    object for every element that Python touches, and that work holds the GIL.
+    So the pipeline passes a process pool, not a thread pool. A worker returns
+    an Arrow table, which crosses the process boundary as raw buffers.
+    The largest files go first, so a long task never starts last. The results
+    are put back in input order, so the output never depends on scheduling.
+    """
+    if pool is None:
+        results = [parse_task(doc) for doc in docs]
+    else:
+        sizes = [(doc.info_table_path or doc.primary_doc_path).stat().st_size for doc in docs]
+        order = sorted(range(len(docs)), key=lambda i: -sizes[i])
+        futures = {i: pool.submit(parse_task, docs[i]) for i in order}
+        results = [futures[i].result() for i in range(len(docs))]
+
+    parsed: list[ParsedFiling] = []
+    for filing, entries in results:
+        parsed.append(filing)
+        quality.entries.extend(entries)
+    parsed.sort(
+        key=lambda item: (
+            item.filing["cik"], item.filing["report_period"], item.filing["accession_number"]
+        )
     )
-    filings = [parsed[i].filing for i in order]
-    holdings: list[dict[str, Any]] = []
-    for i in order:
-        holdings.extend(parsed[i].holdings)
+    filings = pa.Table.from_pylist([item.filing for item in parsed], schema=FILINGS_SCHEMA)
+    holdings = pa.concat_tables([item.holdings for item in parsed]).combine_chunks()
     return ParsedDataset(filings=filings, holdings=holdings)
 
 
@@ -166,7 +217,7 @@ def _parse_cover(docs: FilingDocs, quality: QualityReport) -> dict[str, Any]:
     """Read the cover page into one filing record."""
     ref = docs.ref
     accession = ref.accession
-    root = etree.parse(str(docs.primary_doc_path)).getroot()
+    root = _parse_xml(docs.primary_doc_path)
     root_name = _local_name(root)
     if root_name != _COVER_ROOT:
         quality.record(
@@ -262,88 +313,111 @@ def _parse_cover(docs: FilingDocs, quality: QualityReport) -> dict[str, Any]:
 
 def _parse_rows(
     docs: FilingDocs, filing: dict[str, Any], quality: QualityReport
-) -> list[dict[str, Any]]:
-    """Read the information table into holding rows in source order."""
+) -> pa.Table:
+    """Read the information table into one Arrow table, in source order.
+
+    Each field goes straight into its own column list, so no row object is
+    ever built. Each row costs three child maps: the row, its share block,
+    and its voting block.
+    """
     if docs.info_table_path is None:
-        return []
+        return HOLDINGS_SCHEMA.empty_table()
     accession = filing["accession_number"]
-    root = etree.parse(str(docs.info_table_path)).getroot()
+    root = _parse_xml(docs.info_table_path)
     root_name = _local_name(root)
     if root_name != _INFO_ROOT:
         quality.record(
             accession, None, "info_table", "unexpected_root", "continued",
             detail=root_name or "",
         )
-    rows: list[dict[str, Any]] = []
-    index = 0
+
+    names: list[str] = []
+    titles: list[str] = []
+    cusips: list[str] = []
+    figis: list[str | None] = []
+    values: list[int] = []
+    amounts: list[int] = []
+    amount_types: list[str] = []
+    put_calls: list[str | None] = []
+    discretions: list[str] = []
+    other_managers: list[str | None] = []
+    sole: list[int] = []
+    shared: list[int] = []
+    none: list[int] = []
+
+    def text(element, column: str, row: int) -> str:
+        found = _text_of(element)
+        if found is None:
+            quality.record(accession, row, column, "absent_non_nullable", "default_applied")
+            return ""
+        return found
+
+    def integer(element, column: str, row: int) -> int:
+        found = _text_of(element)
+        if found is not None and found.isdecimal():
+            return int(found)
+        return _required_int(
+            found, accession=accession, row_index=row, column=column, quality=quality
+        )
+
+    row = 0
     for element in root:
         if _local_name(element) != _ROW:
             continue
-        rows.append(_parse_row(element, index, filing, quality))
-        index += 1
-    return rows
+        children = _child_map(element)
+        shrs = _child_map(children.get("shrsOrPrnAmt"))
+        voting = _child_map(children.get("votingAuthority"))
 
-
-def _parse_row(
-    info_table, row_index: int, filing: dict[str, Any], quality: QualityReport
-) -> dict[str, Any]:
-    """Read one infoTable element into one holding row.
-
-    The row keeps its source position through ``row_index``. Text fields stay
-    as filed: lxml decodes entities once when this code reads .text, and no
-    second decode happens. ``other_manager`` keeps its raw filed text, spaces
-    included; an all-whitespace body still means null.
-    """
-    accession = filing["accession_number"]
-    children = _child_map(info_table)
-
-    shrs = children.get("shrsOrPrnAmt")
-    voting = children.get("votingAuthority")
-
-    def required_int(text: str | None, column: str) -> int:
-        return _required_int(
-            text,
-            accession=accession, row_index=row_index, column=column, quality=quality,
+        names.append(text(children.get("nameOfIssuer"), "name_of_issuer", row))
+        titles.append(text(children.get("titleOfClass"), "title_of_class", row))
+        cusip = text(children.get("cusip"), "cusip", row)
+        if cusip and len(cusip) != 9:
+            quality.record(
+                accession, row, "cusip", "cusip_length_not_9", "stored_as_filed", detail=cusip
+            )
+        cusips.append(cusip)
+        figis.append(_text_of(children.get("figi")))
+        values.append(integer(children.get("value"), "value", row))
+        amounts.append(integer(shrs.get("sshPrnamt"), "ssh_prnamt", row))
+        amount_types.append(text(shrs.get("sshPrnamtType"), "ssh_prnamt_type", row))
+        put_calls.append(_text_of(children.get("putCall")))
+        discretions.append(
+            text(children.get("investmentDiscretion"), "investment_discretion", row)
         )
+        # otherManager keeps its raw filed text, spaces included. An
+        # all-whitespace body still means null.
+        other = children.get("otherManager")
+        other_text = other.text if other is not None else None
+        other_managers.append(other_text if other_text and other_text.strip() else None)
+        sole.append(integer(voting.get("Sole"), "voting_sole", row))
+        shared.append(integer(voting.get("Shared"), "voting_shared", row))
+        none.append(integer(voting.get("None"), "voting_none", row))
+        row += 1
 
-    def required_text(text: str | None, column: str) -> str:
-        return _required_text(
-            text,
-            accession=accession, row_index=row_index, column=column, quality=quality,
-        )
+    def repeat(value: str) -> pa.Array:
+        return pa.array([value] * row, pa.string())
 
-    cusip = required_text(_text_of(children.get("cusip")), "cusip")
-    if cusip and len(cusip) != 9:
-        quality.record(
-            accession, row_index, "cusip", "cusip_length_not_9",
-            "stored_as_filed", detail=cusip,
-        )
-
-    other_element = children.get("otherManager")
-    other_manager = other_element.text if other_element is not None else None
-    if other_manager is not None and not other_manager.strip():
-        other_manager = None
-
-    return {
-        "accession_number": accession,
-        "cik": filing["cik"],
-        "report_quarter": filing["report_quarter"],
-        "name_of_issuer": required_text(_text_of(children.get("nameOfIssuer")), "name_of_issuer"),
-        "title_of_class": required_text(_text_of(children.get("titleOfClass")), "title_of_class"),
-        "cusip": cusip,
-        "figi": _text_of(children.get("figi")),
-        "value": required_int(_text_of(children.get("value")), "value"),
-        "ssh_prnamt": required_int(child_text(shrs, "sshPrnamt"), "ssh_prnamt"),
-        "ssh_prnamt_type": required_text(child_text(shrs, "sshPrnamtType"), "ssh_prnamt_type"),
-        "put_call": _text_of(children.get("putCall")),
-        "investment_discretion": required_text(
-            _text_of(children.get("investmentDiscretion")), "investment_discretion"
-        ),
-        "other_manager": other_manager,
-        "voting_sole": required_int(child_text(voting, "Sole"), "voting_sole"),
-        "voting_shared": required_int(child_text(voting, "Shared"), "voting_shared"),
-        "voting_none": required_int(child_text(voting, "None"), "voting_none"),
-    }
+    return pa.table(
+        {
+            "accession_number": repeat(accession),
+            "cik": repeat(filing["cik"]),
+            "report_quarter": repeat(filing["report_quarter"]),
+            "name_of_issuer": names,
+            "title_of_class": titles,
+            "cusip": cusips,
+            "figi": figis,
+            "value": values,
+            "ssh_prnamt": amounts,
+            "ssh_prnamt_type": amount_types,
+            "put_call": put_calls,
+            "investment_discretion": discretions,
+            "other_manager": other_managers,
+            "voting_sole": sole,
+            "voting_shared": shared,
+            "voting_none": none,
+        },
+        schema=HOLDINGS_SCHEMA,
+    )
 
 
 def _required_text(

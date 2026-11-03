@@ -1,38 +1,47 @@
-"""LLM access for the agent.
+"""LLM access for the agent: one OpenAI-compatible chat endpoint, over httpx.
 
-The challenge organisers supplied this module. Configuration comes from the
-environment. Copy `.env.example` to `.env` and fill it in:
+Configuration comes from the environment. Copy `.env.example` to `.env`:
 
-    LLM_BASE_URL      OpenAI-compatible endpoint
+    LLM_BASE_URL      OpenAI-compatible endpoint, for example http://localhost:11434/v1
     LLM_API_KEY       bearer token
     LLM_MODEL         model id; leave blank to use the first model the endpoint lists
     LLM_MODE          "live" or "mock"
     LLM_TOKEN_BUDGET  hard cap on tokens for one process
 
-Any OpenAI-compatible server works: Ollama, LM Studio, vLLM, llama.cpp.
-LLM_MODE=mock runs the test suite with no model.
+Any OpenAI-compatible server works: Ollama, LM Studio, vLLM, llama.cpp, OpenRouter.
+LLM_MODE=mock returns fixed replies and contacts no endpoint.
 
 Check the setup with:  python -m agents.llm
 
-The agent was tested against google/gemma-4-31B-it on vLLM, at temperature 0.0,
-with guided decoding through extra_body={"guided_json": ...}.
+The challenge organisers supplied the first version of this module, built on
+the OpenAI SDK. This version keeps its interface, its settings, and its
+budget, and sends the one POST it needs through httpx. Importing the SDK took
+about 1.7 s per process; httpx takes about 0.3 s.
 """
 
 from __future__ import annotations
 
-import functools
+import hashlib
 import json
 import os
-from typing import Any, Iterable
+import random
+import threading
+import time
+from collections.abc import Iterable
+from typing import Any
 
+import httpx
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
 TEMPERATURE = 0.0
 REQUEST_TIMEOUT = 120.0
-MAX_RETRIES = 4  # handled inside the SDK, including 429 backoff
+MAX_RETRIES = 4
+_RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504})
+_BACKOFF_BASE_SECONDS = 0.5
+_BACKOFF_MAX_SECONDS = 8.0
+_MAX_RETRY_AFTER_SECONDS = 30.0
 
 
 class LLMError(RuntimeError):
@@ -51,21 +60,22 @@ class _Budget:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.calls = 0
+        self._lock = threading.Lock()
 
     @property
     def total(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
-    def charge(self, usage: Any) -> None:
-        self.calls += 1
-        if usage is not None:
-            self.prompt_tokens += getattr(usage, "prompt_tokens", 0) or 0
-            self.completion_tokens += getattr(usage, "completion_tokens", 0) or 0
-        if self.total > self.limit:
-            raise TokenBudgetExceeded(
-                f"token budget exhausted: {self.total} > {self.limit} "
-                f"after {self.calls} calls"
-            )
+    def charge(self, usage: dict[str, Any] | None) -> None:
+        with self._lock:
+            self.calls += 1
+            if usage:
+                self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
+                self.completion_tokens += int(usage.get("completion_tokens") or 0)
+            if self.total > self.limit:
+                raise TokenBudgetExceeded(
+                    f"token budget exhausted: {self.total} > {self.limit} after {self.calls} calls"
+                )
 
     def snapshot(self) -> dict[str, int]:
         return {
@@ -80,45 +90,87 @@ class _Budget:
 BUDGET = _Budget(limit=int(os.environ.get("LLM_TOKEN_BUDGET", 2_000_000)))
 
 
-@functools.lru_cache(maxsize=1)
-def client() -> OpenAI:
-    """The shared client. Cached so connection pooling actually happens.
+class _Endpoint:
+    """The configured endpoint: one connection pool and the model id.
 
-    Retries are delegated to the SDK, which already understands 429s and Retry-After.
-    Hand-rolling that on top would double the backoff and make throttling worse.
+    The pool keeps the TLS connection open between questions, so only the
+    first question in a process pays for a handshake.
     """
-    base_url = os.environ.get("LLM_BASE_URL")
-    if not base_url:
-        raise LLMError(
-            "LLM_BASE_URL is not set. Copy .env.example to .env and fill it in."
+
+    def __init__(self) -> None:
+        base_url = (os.environ.get("LLM_BASE_URL") or "").strip()
+        if not base_url:
+            raise LLMError("LLM_BASE_URL is not set. Copy .env.example to .env and fill it in.")
+        self.base_url = base_url.rstrip("/")
+        self.http = httpx.Client(
+            timeout=REQUEST_TIMEOUT,
+            headers={"Authorization": f"Bearer {os.environ.get('LLM_API_KEY', 'not-required')}"},
         )
-    return OpenAI(
-        base_url=base_url,
-        api_key=os.environ.get("LLM_API_KEY", "not-required"),
-        timeout=REQUEST_TIMEOUT,
-        max_retries=MAX_RETRIES,
-    )
+        self.model = (os.environ.get("LLM_MODEL") or "").strip() or self._first_model()
+
+    def _first_model(self) -> str:
+        """Ask the endpoint what it serves and take the first entry."""
+        try:
+            listing = self.post_or_get("GET", "/models")
+        except LLMError as exc:
+            raise LLMError(
+                f"LLM_MODEL is unset and the endpoint could not be queried: {exc}"
+            ) from exc
+        models = listing.get("data") or []
+        if not models:
+            raise LLMError("endpoint reports no available models; set LLM_MODEL explicitly")
+        return str(models[0]["id"])
+
+    def post_or_get(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict:
+        """Send one request, with retries on throttling and server errors."""
+        url = self.base_url + path
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                response = self.http.request(method, url, json=body)
+            except httpx.TransportError as exc:
+                if attempt == MAX_RETRIES:
+                    raise LLMError(f"{method} {url} failed: {exc}") from exc
+                time.sleep(_backoff(attempt, None))
+                continue
+            if response.status_code == 200:
+                try:
+                    return response.json()
+                except ValueError as exc:
+                    raise LLMError(f"{method} {url} returned a body that is not JSON") from exc
+            if response.status_code not in _RETRY_STATUSES or attempt == MAX_RETRIES:
+                raise LLMError(
+                    f"{method} {url} returned {response.status_code}: {response.text[:300]}"
+                )
+            time.sleep(_backoff(attempt, response.headers.get("retry-after")))
+        raise AssertionError("unreachable")
 
 
-@functools.lru_cache(maxsize=1)
+def _backoff(attempt: int, retry_after: str | None) -> float:
+    """Seconds before the next attempt: Retry-After when given, else jittered doubling."""
+    if retry_after is not None:
+        try:
+            return min(max(float(retry_after), 0.0), _MAX_RETRY_AFTER_SECONDS)
+        except ValueError:
+            pass
+    delay = min(_BACKOFF_BASE_SECONDS * 2 ** attempt, _BACKOFF_MAX_SECONDS)
+    return delay * (0.75 + random.random() / 2)
+
+
+_ENDPOINT: _Endpoint | None = None
+_ENDPOINT_LOCK = threading.Lock()
+
+
+def endpoint() -> _Endpoint:
+    """The process-wide endpoint, opened on first use."""
+    global _ENDPOINT
+    with _ENDPOINT_LOCK:
+        if _ENDPOINT is None:
+            _ENDPOINT = _Endpoint()
+        return _ENDPOINT
+
+
 def model_id() -> str:
-    """Resolve the model to call.
-
-    Prefers LLM_MODEL. If unset, asks the endpoint what it serves and takes the first
-    entry. A vLLM deployment usually serves exactly one model.
-    """
-    explicit = (os.environ.get("LLM_MODEL") or "").strip()
-    if explicit:
-        return explicit
-    try:
-        models = client().models.list()
-    except Exception as exc:
-        raise LLMError(
-            f"LLM_MODEL is unset and the endpoint could not be queried: {exc}"
-        ) from exc
-    if not models.data:
-        raise LLMError("endpoint reports no available models; set LLM_MODEL explicitly")
-    return models.data[0].id
+    return endpoint().model
 
 
 def complete(
@@ -130,43 +182,32 @@ def complete(
 ) -> str:
     """One completion. Returns the assistant message content.
 
-    Pass `schema` to constrain output to a JSON Schema. vLLM's guided decoding masks
-    tokens that would violate it during generation, so the result is guaranteed
-    parseable rather than merely likely to be. Prefer this over prompting for JSON and
-    hoping.
-
-    The guarantee is structural, not semantic: a schema-valid {"answer": null} is still
-    wrong. Keep schemas flat -- deeply nested constraints measurably degrade answer
-    quality, because the model spends capacity satisfying structure.
+    `schema` goes to the endpoint as vLLM's guided_json, which constrains the
+    output to the JSON Schema during decoding. An endpoint without guided
+    decoding ignores the field, so the caller still checks what comes back.
     """
     msgs = list(messages)
     if os.environ.get("LLM_MODE", "live").lower() == "mock":
         return _mock(msgs, schema)
 
-    # Resolve the client before the model: if LLM_BASE_URL is unset, the direct
-    # "copy .env.example" message is more useful than one nested inside model lookup.
-    api = client()
-    kwargs: dict[str, Any] = {
-        "model": model_id(),
+    api = endpoint()
+    body: dict[str, Any] = {
+        "model": api.model,
         "messages": msgs,
         "temperature": TEMPERATURE,
         "max_tokens": max_tokens,
     }
     if stop:
-        kwargs["stop"] = stop
+        body["stop"] = stop
     if schema is not None:
-        # vLLM reads guided_json off the request body on the OpenAI-compatible route.
-        kwargs["extra_body"] = {"guided_json": schema}
+        body["guided_json"] = schema
 
+    reply = api.post_or_get("POST", "/chat/completions", body)
+    BUDGET.charge(reply.get("usage"))
     try:
-        resp = api.chat.completions.create(**kwargs)
-    except TokenBudgetExceeded:
-        raise
-    except Exception as exc:
-        raise LLMError(f"completion failed: {exc}") from exc
-
-    BUDGET.charge(getattr(resp, "usage", None))
-    return resp.choices[0].message.content or ""
+        return reply["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError) as exc:
+        raise LLMError(f"completion reply has no message: {str(reply)[:300]}") from exc
 
 
 def complete_json(
@@ -175,24 +216,17 @@ def complete_json(
     *,
     max_tokens: int = 1024,
 ) -> Any:
-    """Schema-constrained completion, parsed.
-
-    Guided decoding makes the parse safe, but this still wraps it: a response truncated
-    at max_tokens is a valid prefix and invalid JSON, and that is worth surfacing
-    loudly rather than swallowing.
-    """
+    """Schema-constrained completion, parsed. A reply cut off at max_tokens raises."""
     raw = complete(messages, schema=schema, max_tokens=max_tokens)
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise LLMError(
-            f"guided output did not parse (truncated at max_tokens={max_tokens}?): "
-            f"{raw[:200]!r}"
+            f"guided output did not parse (truncated at max_tokens={max_tokens}?): {raw[:200]!r}"
         ) from exc
 
 
-# The contract agents/answer.py must satisfy. Extra fields are allowed but ignored; do not
-# remove required ones.
+# The contract agents/answer.py must satisfy.
 ANSWER_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -220,14 +254,7 @@ ANSWER_SCHEMA: dict[str, Any] = {
 
 
 def _mock(messages: list[dict[str, str]], schema: dict[str, Any] | None) -> str:
-    """Deterministic canned responses for offline development and CI.
-
-    Keyed on a hash of the conversation, so responses are stable across runs but differ
-    across prompts. Never returns a correct answer: mock mode exercises wiring, not
-    reasoning.
-    """
-    import hashlib
-
+    """A fixed reply keyed on the conversation. Exercises wiring, never reasoning."""
     digest = hashlib.sha256(json.dumps(messages, sort_keys=True).encode()).hexdigest()
     if schema is None:
         return f"[mock response {digest[:8]}]"
@@ -241,8 +268,7 @@ def usage() -> dict[str, int]:
 
 def check() -> None:
     """Confirm the setup works.  python -m agents.llm"""
-    mode = os.environ.get("LLM_MODE", "live").lower()
-    if mode == "mock":
+    if os.environ.get("LLM_MODE", "live").lower() == "mock":
         print("LLM_MODE=mock -- no endpoint contacted")
         print(complete([{"role": "user", "content": "Confirm connection."}]))
         return

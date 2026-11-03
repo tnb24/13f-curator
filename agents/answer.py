@@ -1,6 +1,7 @@
 """The agent: a question in, a structured answer out.
 
-    python -m agents.answer "which manager held the largest Apple position in 2026 Q2?"
+    python -m agents.answer "Which manager held the largest Apple position in 2026 Q2?"
+    python -m agents.answer --trace "..."     # also print the trace to stderr
 
 stdout carries one JSON object and nothing else. Logs go to stderr.
 
@@ -13,30 +14,40 @@ stdout carries one JSON object and nothing else. Logs go to stderr.
 `sources` lists the accession numbers of the filings behind the answer, so a
 researcher can check every answer against EDGAR.
 
-The pipeline runs in five steps:
+One question runs in five steps:
 
     1. reject a question about a quarter outside the dataset (no model call)
-    2. find the fund and issuer spellings the dataset holds    agents/resolve.py
+    2. find the funds and issuers (by CUSIP) that it names     agents/resolve.py
     3. ask the model for one SELECT statement                  agents/sql.py
     4. validate the statement against an allow list            agents/validate.py
-    5. run it on a read-only DuckDB connection                 agents/db.py
+    5. run it on a private, read-only DuckDB                   agents/db.py
+
+`Agent` owns everything that outlives one question: the database and the
+name indexes. A process that asks many questions, such as the eval runner,
+builds one Agent and reuses it. `main()` builds one for a single question.
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime as _datetime
 import decimal
 import json
 import sys
+import time
 import traceback
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from agents import db, resolve, sql as sqlgen, validate
+import duckdb
 
-VALID_UNITS = {"USD", "SHARES", "COUNT", "PERCENT", "NAME", "DATE", "NONE"}
+from agents import db, resolve, validate
+from agents import sql as sqlgen
+from agents.resolve import Issuer, IssuerIndex, Resolution, Resolver
 
-
+VALID_UNITS = frozenset({"USD", "SHARES", "COUNT", "PERCENT", "NAME", "DATE", "NONE"})
 NULL_ANSWER: dict[str, Any] = {"answer": None, "unit": "NONE", "sources": []}
+_PREVIEW_ROWS = 20
 
 
 def _log(message: str) -> None:
@@ -47,8 +58,8 @@ def _log(message: str) -> None:
 def _plain(value: Any) -> Any:
     """Return a value that survives json.dumps.
 
-    DuckDB hands back Decimal for an exact aggregate and date for a date32
-    column. numpy scalars carry an .item() method.
+    DuckDB returns Decimal for an exact aggregate and date for a date32 column.
+    A numpy scalar has an .item() method.
     """
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
@@ -83,11 +94,8 @@ def _collect_sources(rows: list[tuple], names: list[str]) -> list[str]:
             if index >= len(row):
                 continue
             cell = row[index]
-            values = cell if isinstance(cell, (list, tuple)) else [cell]
-            for value in values:
-                if value is None:
-                    continue
-                text = str(value).strip()
+            for value in cell if isinstance(cell, (list, tuple)) else [cell]:
+                text = "" if value is None else str(value).strip()
                 if text:
                     found.add(text)
     return sorted(found)
@@ -96,9 +104,8 @@ def _collect_sources(rows: list[tuple], names: list[str]) -> list[str]:
 def _answer_columns(names: list[str], width: int) -> list[int]:
     """Return the column indexes that carry the answer.
 
-    The prompt puts `accession_number` straight after the answer column, so the
-    second column of a pair is the accession unless it is excluded here. An
-    accession is evidence, not an answer.
+    The prompt puts accession_number after the answer column. An accession is
+    evidence, not an answer, so it is never read as one.
     """
     accessions = set(_accession_columns(names))
     columns = [i for i in range(width) if i not in accessions]
@@ -120,90 +127,252 @@ def _shape_answer(rows: list[tuple], shape: str, names: list[str]) -> Any:
     return _plain(first[columns[0]])
 
 
-def _generate_validated(
-    question: str, funds: list[str], issuers: list[str]
-) -> tuple[str, dict[str, Any]]:
-    """Return validated SQL and the generation. One repair call is allowed."""
-    generation = sqlgen.generate(question, funds, issuers)
-    try:
-        return validate.check(generation["sql"]), generation
-    except validate.SQLRejected as rejected:
-        _log(f"agent: the validator rejected the first statement: {rejected}")
-        generation = sqlgen.generate(question, funds, issuers, error=str(rejected))
-        return validate.check(generation["sql"]), generation
+@dataclass
+class Trace:
+    """How one answer came about. The CLI prints it on --trace; the evals store it."""
+
+    question: str
+    out_of_scope: str | None = None
+    terms: list[str] = field(default_factory=list)
+    funds: list[str] = field(default_factory=list)
+    issuers: list[dict[str, Any]] = field(default_factory=list)
+    sql: str | None = None
+    rejected: list[str] = field(default_factory=list)
+    model_calls: int = 0
+    columns: list[str] = field(default_factory=list)
+    rows: list[list[Any]] = field(default_factory=list)
+    row_count: int = 0
+    error: str | None = None
+    timings_ms: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class Answer:
+    answer: Any
+    unit: str
+    sources: list[str]
+    trace: Trace
+
+    def contract(self) -> dict[str, Any]:
+        """The three keys that the CLI prints and the grader reads."""
+        return {"answer": self.answer, "unit": self.unit, "sources": list(self.sources)}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.contract(), "trace": asdict(self.trace)}
+
+
+class _Clock:
+    """Milliseconds per step, into the trace."""
+
+    def __init__(self, trace: Trace) -> None:
+        self._trace = trace
+        self._started = time.perf_counter()
+        self._mark = self._started
+
+    def lap(self, step: str) -> None:
+        now = time.perf_counter()
+        self._trace.timings_ms[step] = round((now - self._mark) * 1000, 2)
+        self._mark = now
+
+    def total(self) -> None:
+        self._trace.timings_ms["total"] = round((time.perf_counter() - self._started) * 1000, 2)
+
+
+_SPELLINGS_SQL = """
+SELECT cusip, name_of_issuer, title_of_class, count(*) AS n
+FROM holdings GROUP BY ALL ORDER BY cusip, n DESC, name_of_issuer, title_of_class
+"""
+
+
+def build_resolver(engine: db.Engine) -> Resolver:
+    """Build the fund and issuer indexes from one scan of each table.
+
+    One grouped scan of holdings returns every (cusip, spelling, class) with
+    its row count, most common first within each CUSIP. That ordering gives
+    each CUSIP its usual name and class, and the rows give every spelling.
+    """
+    funds = [row[0] for row in engine.query(
+        "SELECT DISTINCT fund_name FROM filings ORDER BY 1", limit=10_000).rows]
+
+    groups = engine.query(_SPELLINGS_SQL, limit=10_000_000).rows
+    names: dict[str, dict[str, int]] = {}
+    titles: dict[str, dict[str, int]] = {}
+    for cusip, name, title, count in groups:
+        spelled = names.setdefault(cusip, {})
+        spelled[name] = spelled.get(name, 0) + count
+        classed = titles.setdefault(cusip, {})
+        classed[title] = classed.get(title, 0) + count
+
+    def usual(counts: dict[str, int]) -> str:
+        return min(counts, key=lambda text: (-counts[text], text))
+
+    issuers = {
+        cusip: Issuer(
+            cusip=cusip,
+            name=usual(spelled),
+            title_of_class=usual(titles[cusip]),
+            rows=sum(spelled.values()),
+        )
+        for cusip, spelled in names.items()
+    }
+    spellings = [(cusip, name) for cusip, spelled in names.items() for name in spelled]
+    return Resolver(funds, IssuerIndex(spellings, issuers))
+
+
+class Agent:
+    """The dataset, its indexes, and a model, ready to answer questions."""
+
+    def __init__(
+        self,
+        sources: dict[str, Any] | None = None,
+        complete: sqlgen.Complete | None = None,
+    ) -> None:
+        started = time.perf_counter()
+        if complete is None:
+            from agents.llm import complete as live_complete
+
+            complete = live_complete
+        self._complete = complete
+        self.engine = db.Engine(sources)
+        try:
+            self.resolver = build_resolver(self.engine)
+        except BaseException:
+            self.engine.close()
+            raise
+        self.startup_ms = round((time.perf_counter() - started) * 1000, 1)
+
+    def close(self) -> None:
+        self.engine.close()
+
+    def __enter__(self) -> Agent:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def ask(self, question: str) -> Answer:
+        """Answer one question. Never raises: a failure is a null answer and a trace."""
+        trace = Trace(question=question)
+        clock = _Clock(trace)
+        try:
+            return self._ask(question, trace, clock)
+        except Exception as exc:  # The contract: ask() never raises; the trace keeps why.
+            trace.error = f"{type(exc).__name__}: {exc}"
+            _log(f"agent: returning a null answer after {trace.error}")
+            traceback.print_exc(file=sys.stderr)
+            return Answer(None, "NONE", [], trace)
+        finally:
+            clock.total()
+
+    def _ask(self, question: str, trace: Trace, clock: _Clock) -> Answer:
+        reason = resolve.out_of_scope(question)
+        if reason:
+            trace.out_of_scope = reason
+            _log(f"agent: out of scope, so no model call happens: {reason}")
+            return Answer(None, "NONE", [], trace)
+
+        resolution = self.resolver.resolve(question)
+        trace.terms = resolution.terms
+        trace.funds = resolution.funds
+        trace.issuers = [asdict(issuer) for issuer in resolution.issuers]
+        clock.lap("resolve")
+
+        statement, generation, result = self._generate_and_run(question, resolution, trace, clock)
+        trace.sql = statement
+        trace.columns = result.columns
+        trace.row_count = len(result.rows)
+        trace.rows = [[_plain(cell) for cell in row] for row in result.rows[:_PREVIEW_ROWS]]
+
+        if not result.rows:
+            # The prompt asks for an aggregate, so an empty result means the
+            # query shape was wrong, not that the answer is "no".
+            _log("agent: the query returned no row")
+            return Answer(None, "NONE", [], trace)
+
+        answer = _shape_answer(result.rows, generation["result_shape"], result.columns)
+        sources = _collect_sources(result.rows, result.columns)
+        unit = generation["unit"] if answer is not None else "NONE"
+        return Answer(answer, unit, sources, trace)
+
+    def _generate_and_run(
+        self, question: str, resolution: Resolution, trace: Trace, clock: _Clock
+    ) -> tuple[str, dict[str, Any], db.Result]:
+        """Generate, validate, and run one statement. One repair call is allowed.
+
+        A statement can fail at two points: the validator rejects it, or DuckDB
+        fails to bind it (an unknown function, a column outside GROUP BY). Both
+        failures send the error message back to the model once. A timeout is
+        not repaired: a second statement would most likely time out too.
+        """
+        cursor = self.engine.cursor()
+        try:
+            error: str | None = None
+            for _attempt in range(2):
+                trace.model_calls += 1
+                generation = sqlgen.generate(
+                    question, resolution.funds, resolution.issuers, self._complete, error=error
+                )
+                clock.lap(f"model_{trace.model_calls}")
+                try:
+                    statement = validate.check(generation["sql"], cursor)
+                    clock.lap("validate")
+                    result = self.engine.query(statement)
+                    clock.lap("query")
+                    return statement, generation, result
+                except (validate.SQLRejected, duckdb.Error) as failure:
+                    if isinstance(failure, duckdb.InterruptException):
+                        raise
+                    error = f"{type(failure).__name__}: {str(failure).splitlines()[0]}"
+                    trace.rejected.append(error)
+                    clock.lap(f"failed_{trace.model_calls}")
+                    _log(f"agent: statement {trace.model_calls} failed: {error}")
+            raise validate.SQLRejected(f"two statements failed; last: {error}")
+        finally:
+            cursor.close()
 
 
 def main(question: str) -> dict[str, Any]:
-    """Answer `question` against the dataset. Never raises."""
+    """Answer one question in a fresh Agent. Never raises.
+
+    The scope check runs first, so an out-of-scope question opens no database
+    and makes no model call.
+    """
+    reason = resolve.out_of_scope(question)
+    if reason:
+        _log(f"agent: out of scope, so no model call happens: {reason}")
+        return dict(NULL_ANSWER)
     try:
-        # Step 1. An out-of-scope quarter returns before the agent spends a
-        # token and before it opens the database.
-        reason = resolve.out_of_scope(question)
-        if reason:
-            _log(f"agent: out of scope, so no model call happens: {reason}")
-            return dict(NULL_ANSWER)
-
-        connection = db.connect()
-        funds = resolve.fund_candidates(question, connection)
-        issuers = resolve.issuer_candidates(question, connection)
-        _log(f"agent: {len(funds)} fund candidate(s), {len(issuers)} issuer candidate(s)")
-
-        statement, generation = _generate_validated(question, funds, issuers)
-        _log(f"agent: running {statement}")
-
-        rows = db.query(connection, statement)
-        names = [column[0] for column in (connection.description or [])]
-
-        if not rows:
-            _log(
-                "agent: the query returned no row. The prompt asks for an aggregate, "
-                "so an empty result means the query shape was wrong, not that the "
-                "answer is No."
-            )
-            return dict(NULL_ANSWER)
-
-        answer = _shape_answer(rows, generation["result_shape"], names)
-        sources = _collect_sources(rows, names)
-        if not _accession_columns(names):
-            _log("agent: the projection carried no accession column, so sources is empty")
-
-        unit = generation["unit"]
-        if unit not in VALID_UNITS:
-            _log(f"agent: the model returned unit {unit!r}, which is not allowed")
-            unit = "NONE"
-        if answer is None:
-            unit = "NONE"
-
-        return {"answer": answer, "unit": unit, "sources": sources}
-    except Exception as exc:  # noqa: BLE001 - the agent must never raise.
+        with Agent() as agent:
+            return agent.ask(question).contract()
+    except Exception as exc:  # The contract: main() never raises, even if startup fails.
         _log(f"agent: returning a null answer after {type(exc).__name__}: {exc}")
-        traceback.print_exc(file=sys.stderr)
         return dict(NULL_ANSWER)
 
 
 def _cli() -> int:
-    if len(sys.argv) < 2:
-        print('usage: python -m agents.answer "your question"', file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(prog="python -m agents.answer")
+    parser.add_argument("question")
+    parser.add_argument("--trace", action="store_true", help="print the trace to stderr")
+    args = parser.parse_args()
 
-    result = main(sys.argv[1])
+    if args.trace:
+        reason = resolve.out_of_scope(args.question)
+        if reason:
+            result = dict(NULL_ANSWER)
+            _log(json.dumps({"out_of_scope": reason}, indent=2))
+        else:
+            with Agent() as agent:
+                answer = agent.ask(args.question)
+            result = answer.contract()
+            _log(json.dumps(asdict(answer.trace), indent=2, default=str))
+    else:
+        result = main(args.question)
 
     # Check the shape here, so a mistake surfaces before a caller parses stdout.
-    if not isinstance(result, dict):
-        print(f"main() must return a dict, got {type(result).__name__}", file=sys.stderr)
-        return 1
     missing = {"answer", "unit", "sources"} - set(result)
-    if missing:
-        print(f"result missing key(s): {sorted(missing)}", file=sys.stderr)
+    if missing or result["unit"] not in VALID_UNITS or not isinstance(result["sources"], list):
+        _log(f"agent: malformed result {result!r}")
         return 1
-    if result["unit"] not in VALID_UNITS:
-        print(f"unit must be one of {sorted(VALID_UNITS)}, got {result['unit']!r}",
-              file=sys.stderr)
-        return 1
-    if not isinstance(result["sources"], list):
-        print("sources must be a list of accession numbers", file=sys.stderr)
-        return 1
-
     print(json.dumps(result))
     return 0
 

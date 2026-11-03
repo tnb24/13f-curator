@@ -7,28 +7,41 @@ always describes a complete body, because the code writes the body first.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-from curator.http import Fetcher
+from typing import Protocol
 
 _HTTP_SUBDIR = "http"
 
 
+class FetchError(RuntimeError):
+    """A GET did not return 200 after every retry."""
+
+
+class Source(Protocol):
+    """Anything that returns the body for a URL. `curator.http.Fetcher` is one.
+
+    `get` raises FetchError when no body can be had.
+    """
+
+    def get(self, url: str) -> bytes: ...
+
+
 def _utc_now_z() -> str:
     """Return now in UTC as second precision with a literal Z suffix."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class Cache:
     """Return cached bodies. Fetch and store each body on a miss."""
 
-    def __init__(self, root: Path, fetcher: Fetcher, manifest: "Manifest") -> None:
+    def __init__(self, root: Path, fetcher: Source, manifest: Manifest) -> None:
         self._root = Path(root)
         self._dir = self._root / _HTTP_SUBDIR
         self._fetcher = fetcher
@@ -78,10 +91,8 @@ def _atomic_write_bytes(target: Path, payload: bytes) -> None:
             handle.write(payload)
         os.replace(tmp_name, target)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
 

@@ -1,11 +1,11 @@
 # Example questions
 
-`scripts/run_examples.py` reads the questions in the block below. It runs each one
-through the agent and writes the results and token counts to
-`output/agent_usage.json`.
+The challenge organisers supplied these ten questions. They are the first ten items of
+the development set, `evals/questions.json`, which holds each one's reference SQL,
+answer key, and conventions. `python -m evals.run` asks and grades them.
 
 The last question asks about 2026 Q3, which is not in the dataset. The correct
-answer is `null`, with the reason on stderr.
+answer is `null`, with the reason on stderr and no model call.
 
 ```
 Which manager held the largest Apple position in 2026 Q2?

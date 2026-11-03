@@ -10,26 +10,22 @@ sequence number all come out of the filings themselves.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import pyarrow as pa
 from lxml import etree
 
 from curator.cache import Cache
-from curator.discover import FilingRef
+from curator.discover import filing_frames
 from curator.download import download
-from curator.parse import QualityReport, child_text, parse_filing
-from curator.scope import FILING_DATE_CUTOFF, SUBMISSIONS_URL
-from curator.write import HOLDINGS_SCHEMA, _write_atomic
+from curator.parse import ParsedDataset, QualityReport, child_text, parse_filing
+from curator.records import FilingRef
+from curator.schema import ATTRIBUTED_SCHEMA
+from curator.scope import FILING_DATE_CUTOFF
+from curator.write import write_table_atomic
 
 _PARENT_FORMS = ("13F-HR", "13F-HR/A")
-
-BONUS1_SCHEMA = pa.schema(
-    list(HOLDINGS_SCHEMA) + [pa.field("attributed_to_cik", pa.string(), nullable=False)]
-)
 
 
 def _local(element) -> str | None:
@@ -97,32 +93,39 @@ def _sequence_map(cover_path: Path) -> dict[str, dict[str, str | None]]:
 
 
 def _find_parent_ref(cache: Cache, cik: str, report_date: str) -> FilingRef | None:
-    """Find the parent's 13F-HR for the same period through the submissions API."""
-    payload = json.loads(cache.get(SUBMISSIONS_URL.format(cik)))
-    recent = (payload.get("filings") or {}).get("recent") or {}
-    accessions = recent.get("accessionNumber") or []
-    blank = [None] * len(accessions)
-    for index, accession in enumerate(accessions):
-        form = (recent.get("form") or blank)[index]
-        reported = (recent.get("reportDate") or blank)[index]
-        filed = (recent.get("filingDate") or blank)[index]
-        if form not in _PARENT_FORMS or reported != report_date:
-            continue
-        if not filed or filed > FILING_DATE_CUTOFF:
-            continue
-        return FilingRef(
-            cik=f"{int(cik):010d}",
-            fund_name=payload.get("name") or "",
-            accession=accession,
-            form=form,
-            report_date=reported,
-            filing_date=filed,
-            primary_document=(recent.get("primaryDocument") or [""] * len(accessions))[index],
+    """Find the parent's 13F-HR for the same period through the submissions API.
+
+    The search reads every page of the parent's filing history, as discovery
+    does, so an old parent with more than 1000 filings is still found.
+    """
+    frames, name = filing_frames(cache, cik)
+    for frame in frames:
+        columns = zip(
+            frame.get("accessionNumber") or [],
+            frame.get("form") or [],
+            frame.get("reportDate") or [],
+            frame.get("filingDate") or [],
+            frame.get("primaryDocument") or [],
+            strict=False,
         )
+        for accession, form, reported, filed, primary in columns:
+            if form not in _PARENT_FORMS or reported != report_date:
+                continue
+            if not filed or filed > FILING_DATE_CUTOFF:
+                continue
+            return FilingRef(
+                cik=f"{int(cik):010d}",
+                fund_name=name,
+                accession=accession,
+                form=form,
+                report_date=reported,
+                filing_date=filed,
+                primary_document=primary or "",
+            )
     return None
 
 
-def run_bonus1(dataset, cache: Cache, output: Path) -> None:
+def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     """Attribute the notice filer's rows out of the parent filing."""
     output = Path(output)
     # The parent is not on the roster, so its documents must not land under
@@ -130,10 +133,12 @@ def run_bonus1(dataset, cache: Cache, output: Path) -> None:
     work = Path(cache.root) / "bonus1"
     work.mkdir(parents=True, exist_ok=True)
 
-    rows: list[dict[str, Any]] = []
+    attributed: list[pa.Table] = []
     quality = QualityReport()
 
-    notices = [f for f in dataset.filings if str(f["form_type"]).startswith("13F-NT")]
+    notices = [
+        f for f in dataset.filings.to_pylist() if str(f["form_type"]).startswith("13F-NT")
+    ]
     print(f"curator.bonus1: {len(notices)} notice filing(s)", file=sys.stderr)
 
     for notice in notices:
@@ -181,17 +186,17 @@ def run_bonus1(dataset, cache: Cache, output: Path) -> None:
                 continue
 
             sequence = wanted[0]
-            matched = [
-                row
-                for row in parsed.holdings
-                if sequence in _tokens(row.get("other_manager"))
+            carries = [
+                sequence in _tokens(value)
+                for value in parsed.holdings.column("other_manager").to_pylist()
             ]
+            matched = parsed.holdings.filter(pa.array(carries, pa.bool_()))
             print(
-                f"curator.bonus1: the parent holds {len(parsed.holdings)} row(s); "
-                f"{len(matched)} carry sequence {sequence}",
+                f"curator.bonus1: the parent holds {parsed.holdings.num_rows} row(s); "
+                f"{matched.num_rows} carry sequence {sequence}",
                 file=sys.stderr,
             )
-            if not matched:
+            if not matched.num_rows:
                 # A justified zero beats an unjustified set of rows.
                 print(
                     f"curator.bonus1: sequence {sequence} appears in no otherManager "
@@ -200,11 +205,13 @@ def run_bonus1(dataset, cache: Cache, output: Path) -> None:
                 )
                 continue
 
-            for row in matched:
-                record = {field.name: row.get(field.name) for field in HOLDINGS_SCHEMA}
-                record["attributed_to_cik"] = f"{int(notice_cik):010d}"
-                rows.append(record)
+            owner = pa.array([f"{int(notice_cik):010d}"] * matched.num_rows, pa.string())
+            attributed.append(
+                matched.append_column(ATTRIBUTED_SCHEMA.field("attributed_to_cik"), owner)
+            )
 
-    table = pa.Table.from_pylist(rows, schema=BONUS1_SCHEMA)
-    _write_atomic(table, output / "bonus_attributed.parquet")
-    print(f"curator.bonus1: wrote {len(rows)} attributed row(s)", file=sys.stderr)
+    table = (
+        pa.concat_tables(attributed) if attributed else ATTRIBUTED_SCHEMA.empty_table()
+    )
+    write_table_atomic(table, output / "bonus_attributed.parquet")
+    print(f"curator.bonus1: wrote {table.num_rows} attributed row(s)", file=sys.stderr)

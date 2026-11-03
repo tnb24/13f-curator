@@ -9,10 +9,14 @@ Checks run in order:
 2. Must start with SELECT or WITH, after whitespace and leading comments.
 3. No forbidden keyword outside string literals.
 4. No file- or environment-reading function name outside string literals.
-5. DuckDB must parse it, it must be one statement, and every table and column
-   name in the parse tree must be known.
-6. The projection must include accession_number.
-7. A limit of 1000 rows is appended when the statement has none.
+5. DuckDB must parse it, it must be one statement, and every relation in the
+   parse tree must be filings, holdings, a CTE, or a subquery. A table
+   function (read_text, query, range, ...) is never a relation here, and a
+   table name may carry no catalog and no schema other than main.
+6. Every column name in the parse tree must be known.
+7. The projection must include accession_number.
+8. A limit of 1000 rows is appended on its own line when the statement has
+   none, so a trailing line comment cannot swallow it.
 
 String literals are blanked before checks 3 and 4, so
 `WHERE upper(put_call) = 'CALL'` passes even though "call" is forbidden as a
@@ -21,11 +25,11 @@ keyword.
 
 from __future__ import annotations
 
-import functools
 import json
 import re
 
 import duckdb
+
 
 class SQLRejected(Exception):
     """The statement failed validation. The message holds the reason."""
@@ -57,10 +61,19 @@ _FORBIDDEN_KEYWORDS = {
 }
 
 _FORBIDDEN_FUNCTIONS = {
-    "read_csv", "read_parquet", "read_json", "glob", "getenv", "shell",
-    "system",
+    "read_csv", "read_parquet", "read_json", "read_text", "read_blob", "glob",
+    "getenv", "shell", "system", "query", "query_table",
 }
 
+
+def _word_pattern(words: set[str]) -> re.Pattern[str]:
+    """One pattern that finds any of the words, so each scan reads the text once."""
+    alternatives = "|".join(sorted(re.escape(word) for word in words))
+    return re.compile(rf"\b({alternatives})\b", re.IGNORECASE)
+
+
+_KEYWORD_RE = _word_pattern(_FORBIDDEN_KEYWORDS)
+_FUNCTION_RE = _word_pattern(_FORBIDDEN_FUNCTIONS)
 _ROW_LIMIT = 1000
 
 
@@ -130,23 +143,23 @@ def _skip_leading_comments(sql: str) -> str:
         return stripped
 
 
-def _reject_keyword(word: str, text: str, kind: str) -> None:
-    pattern = re.compile(r"\b" + re.escape(word) + r"\b", re.IGNORECASE)
+def _reject_words(pattern: re.Pattern[str], text: str, kind: str) -> None:
     match = pattern.search(text)
     if match:
+        word = match.group(1).lower()
         raise SQLRejected(f"forbidden {kind} {word!r} at position {match.start()}")
 
 
-@functools.lru_cache(maxsize=1)
-def _parser_connection() -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(":memory:")
+def _parse(sql: str, conn: duckdb.DuckDBPyConnection) -> dict:
+    """Return DuckDB's parse tree for one statement. Nothing runs.
 
-
-def _parse(sql: str) -> dict:
-    conn = _parser_connection()
-    raw = conn.execute(
-        "SELECT json_serialize_sql(CAST(? AS VARCHAR))", [sql]
-    ).fetchone()[0]
+    The statement travels as a quoted literal, not a bound parameter. A bound
+    parameter makes the DuckDB client import pandas when pandas is installed,
+    and that import costs about 0.9 s. In a plain literal only a quote needs
+    escaping, and doubling it is DuckDB's escape.
+    """
+    literal = "'" + sql.replace("'", "''") + "'"
+    raw = conn.execute(f"SELECT json_serialize_sql({literal})").fetchone()[0]
     if not raw:
         raise SQLRejected("DuckDB returned no parse tree")
     tree = json.loads(raw)
@@ -238,9 +251,12 @@ def _node_projects_accession(node: dict) -> bool:
         if item.get("type") == "STAR":
             return True
         column_names = item.get("column_names")
-        if isinstance(column_names, list) and column_names:
-            if str(column_names[-1]).lower() == "accession_number":
-                return True
+        if (
+            isinstance(column_names, list)
+            and column_names
+            and str(column_names[-1]).lower() == "accession_number"
+        ):
+            return True
     return False
 
 
@@ -250,21 +266,40 @@ def _projects_accession_number(statement: dict) -> bool:
 
 def _has_top_level_limit(statement: dict) -> bool:
     node = statement.get("node") or {}
-    for modifier in node.get("modifiers") or []:
-        if modifier.get("type") == "LIMIT_MODIFIER":
-            return True
-    return False
+    return any(
+        modifier.get("type") == "LIMIT_MODIFIER" for modifier in node.get("modifiers") or []
+    )
 
 
-def check(sql: str) -> str:
-    """Return a safe SQL string. Raise SQLRejected with a reason."""
+def _check_relations(statement: dict) -> None:
+    """Every FROM entry is a known base table, a CTE, a subquery, or a join of those."""
+    for node in _walk(statement):
+        kind = node.get("type")
+        if kind == "TABLE_FUNCTION":
+            function = (node.get("function") or {}).get("function_name") or "?"
+            raise SQLRejected(f"table function {function!r} is not allowed")
+        if kind == "BASE_TABLE":
+            catalog = str(node.get("catalog_name") or "")
+            schema = str(node.get("schema_name") or "").lower()
+            if catalog or schema not in ("", "main"):
+                qualified = ".".join(part for part in (catalog, schema) if part)
+                raise SQLRejected(f"qualified table name {qualified!r} is not allowed")
+
+
+def check(sql: str, conn: duckdb.DuckDBPyConnection) -> str:
+    """Return a safe SQL string. Raise SQLRejected with a reason.
+
+    `conn` parses the statement through json_serialize_sql and runs nothing.
+    Any DuckDB connection works; the agent passes a cursor of its engine.
+    """
     if not sql or not sql.strip():
         raise SQLRejected("empty statement")
 
-    # Check 1: one statement only.
+    # Check 1: one statement only. A semicolon inside a literal or a comment
+    # ends no statement, so the scan reads the blanked text.
     statement_text = _strip_one_trailing_semicolon(sql)
-    if ";" in statement_text:
-        position = statement_text.index(";")
+    position = _blank_literals_and_comments(statement_text).find(";")
+    if position != -1:
         raise SQLRejected(
             f"expected one statement, found a semicolon at position {position}"
         )
@@ -277,20 +312,28 @@ def check(sql: str) -> str:
 
     # Checks 3 and 4: keywords and function names outside literals.
     code_only = _blank_literals_and_comments(body)
-    for keyword in sorted(_FORBIDDEN_KEYWORDS):
-        _reject_keyword(keyword, code_only, "keyword")
-    for function in sorted(_FORBIDDEN_FUNCTIONS):
-        _reject_keyword(function, code_only, "function")
+    _reject_words(_KEYWORD_RE, code_only, "keyword")
+    _reject_words(_FUNCTION_RE, code_only, "function")
 
-    # Check 5: DuckDB parses it; one statement; known names only.
-    parsed = _parse(body)
+    # Checks 5 and 6: DuckDB parses it; one statement; known relations and names.
+    parsed = _parse(body, conn)
+    _check_relations(parsed)
     _check_names(parsed)
 
-    # Check 6: accession_number must appear in the projection.
+    # Check 7: accession_number must appear in the projection.
     if not _projects_accession_number(parsed):
         raise SQLRejected("the projection must include accession_number")
 
-    # Check 7: cap the row count.
+    # An occurrence inside COUNT, a scalar subquery, or * EXCLUDE is not a
+    # citation column. Bind (without executing) and check the actual output
+    # names/types the answer collector will see. This cannot prove that a
+    # model's citations are relevant to its question.
+    columns = conn.execute(f"DESCRIBE {body}").fetchall()
+    if not any("accession" in name.lower() and dtype in ("VARCHAR", "VARCHAR[]")
+               for name, dtype, *_rest in columns):
+        raise SQLRejected("the projection must expose a string accession_number column")
+
+    # Check 8: cap the row count.
     if not _has_top_level_limit(parsed):
-        statement_text = f"{statement_text.rstrip()} LIMIT {_ROW_LIMIT}"
+        statement_text = f"{statement_text.rstrip()}\nLIMIT {_ROW_LIMIT}"
     return statement_text

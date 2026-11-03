@@ -10,10 +10,19 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
-from agents.llm import complete
 from agents.prompts import SYSTEM_PROMPT, build_user_prompt
+from agents.resolve import Issuer
+
+# The model call: messages in, the reply text out. agents.llm.complete is the
+# live one; the tests pass a function that returns a fixed reply.
+Complete = Callable[..., str]
+
+# A SQL statement for this schema runs to about 200 tokens. The cap stops a
+# reply that never closes its JSON object from running on for seconds.
+MAX_TOKENS = 512
 
 GENERATION_SCHEMA = {
     "type": "object",
@@ -37,9 +46,9 @@ class AgentError(Exception):
 
 # The development model answers with the JSON object inside a markdown fence.
 # `agents.llm.complete_json` runs `json.loads` on the raw text, so it raises on
-# every live call. That file is frozen, so this module calls `complete` and
-# parses the text itself. The schema still goes to the endpoint, so guided
-# decoding keeps working where the endpoint supports it.
+# every live call. So this module calls `complete` and parses the text itself.
+# The schema still goes to the endpoint, so guided decoding keeps working where
+# the endpoint supports it.
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
 
@@ -118,7 +127,8 @@ def _check_shape(response: Any) -> None:
 def generate(
     question: str,
     funds: list[str],
-    issuers: list[str],
+    issuers: list[Issuer],
+    complete: Complete,
     error: str | None = None,
 ) -> dict:
     """Return {"sql", "unit", "result_shape"} for one question.
@@ -134,7 +144,7 @@ def generate(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user},
     ]
-    raw = complete(messages, schema=GENERATION_SCHEMA, max_tokens=1024)
+    raw = complete(messages, schema=GENERATION_SCHEMA, max_tokens=MAX_TOKENS)
     response = _parse_object(raw)
     _check_shape(response)
     return response

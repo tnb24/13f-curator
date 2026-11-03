@@ -894,7 +894,7 @@ def _in_scope_count(payload: dict) -> int:
         recent.get("accessionNumber") or [],
         recent.get("form") or [],
         recent.get("reportDate") or [],
-        recent.get("filingDate") or [],
+        recent.get("filingDate") or [], strict=False,
     )
     count = 0
     for _accession, form, report_date, filing_date in columns:

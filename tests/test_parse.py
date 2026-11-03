@@ -9,9 +9,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from curator.discover import FilingRef
-from curator.download import FilingDocs
-from curator.parse import QualityReport, parse_filing
+from curator.parse import QualityReport, parse_all, parse_filing
+from curator.records import FilingDocs, FilingRef
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -43,7 +42,7 @@ def _parse(docs: FilingDocs | None = None):
     """Parse one docs pair. Return (filing record, holdings, quality report)."""
     quality = QualityReport()
     parsed = parse_filing(docs or _docs(), quality)
-    return parsed.filing, parsed.holdings, quality
+    return parsed.filing, parsed.holdings.to_pylist(), quality
 
 
 def test_default_namespace():
@@ -70,7 +69,8 @@ def test_prefixed_namespace():
 
 
 def test_mixed_namespaces_in_one_filing():
-    filing, holdings, _ = _parse(_docs(primary_doc="cover_regular.xml", info_table="info_prefixed.xml"))
+    docs = _docs(primary_doc="cover_regular.xml", info_table="info_prefixed.xml")
+    filing, holdings, _ = _parse(docs)
     assert filing["filing_manager"] == "TEST MANAGER LLC"
     assert len(holdings) == 1
     assert holdings[0]["accession_number"] == filing["accession_number"]
@@ -173,3 +173,60 @@ def test_a_short_cusip():
         and entry["row_index"] == 3
     ]
     assert len(matches) == 1
+
+
+def test_an_absent_required_field_gets_a_default_and_a_quality_entry(tmp_path):
+    """Absence is never silent: the row survives and the report names it."""
+    table = (FIXTURES / "info_default.xml").read_text(encoding="utf-8")
+    broken = table.replace("<value>", "<!-- no value --><unused>", 1).replace(
+        "</value>", "</unused>", 1
+    )
+    path = tmp_path / "info_missing_value.xml"
+    path.write_text(broken, encoding="utf-8")
+    _, holdings, quality = _parse(FilingDocs(
+        ref=_ref(), info_table_path=path, primary_doc_path=FIXTURES / "cover_regular.xml"))
+    assert holdings[0]["value"] == 0
+    assert any(
+        e["field"] == "value" and e["issue"] == "absent_non_nullable" and e["row_index"] == 0
+        for e in quality.entries
+    )
+
+
+def test_an_unparseable_integer_is_reported(tmp_path):
+    table = (FIXTURES / "info_default.xml").read_text(encoding="utf-8")
+    path = tmp_path / "info_bad_int.xml"
+    path.write_text(table.replace("<sshPrnamt>", "<sshPrnamt>1,", 1), encoding="utf-8")
+    _, holdings, quality = _parse(FilingDocs(
+        ref=_ref(), info_table_path=path, primary_doc_path=FIXTURES / "cover_regular.xml"))
+    assert holdings[0]["ssh_prnamt"] == 0
+    assert any(e["issue"] == "unparseable_int" and e["field"] == "ssh_prnamt"
+               for e in quality.entries)
+
+
+def test_parse_all_sorts_filings_and_keeps_holdings_with_them():
+    late = _docs(ref=_ref(accession="0001350693-26-000009"))
+    early = _docs(ref=_ref(accession="0001350693-26-000001"))
+    quality = QualityReport()
+    dataset = parse_all([late, early], quality)
+    assert dataset.filings.column("accession_number").to_pylist() == [
+        "0001350693-26-000001", "0001350693-26-000009",
+    ]
+    assert dataset.holdings.column("accession_number").to_pylist() == (
+        ["0001350693-26-000001"] * 4 + ["0001350693-26-000009"] * 4
+    )
+    # Both filings carry the hazards fixture, so each reports its short CUSIP.
+    assert len([e for e in quality.entries if e["issue"] == "cusip_length_not_9"]) == 2
+
+
+def test_a_declared_entity_is_not_expanded(tmp_path):
+    """The parser resolves no declared entity, so a DTD cannot inject text."""
+    table = (FIXTURES / "info_default.xml").read_text(encoding="utf-8")
+    hostile = table.replace(
+        '<?xml version="1.0"?>',
+        '<?xml version="1.0"?>\n<!DOCTYPE x [<!ENTITY evil "INJECTED">]>',
+    ).replace("<titleOfClass>COM</titleOfClass>", "<titleOfClass>&evil;</titleOfClass>", 1)
+    path = tmp_path / "hostile.xml"
+    path.write_text(hostile, encoding="utf-8")
+    _, holdings, _ = _parse(FilingDocs(
+        ref=_ref(), info_table_path=path, primary_doc_path=FIXTURES / "cover_regular.xml"))
+    assert "INJECTED" not in holdings[0]["title_of_class"]

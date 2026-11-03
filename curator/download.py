@@ -8,35 +8,22 @@ filing is a notice. Regular filings also keep the cover page at
 
 from __future__ import annotations
 
+import io
 import json
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from lxml import etree
 from lxml.etree import QName
 
 from curator.cache import Cache
-from curator.discover import FilingRef
+from curator.records import FilingDocs, FilingRef
 
 _ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/"
 _INDEX_NAME = "index.json"
 _COVER_FILENAME = "primary_doc.xml"
 _INFO_TABLE_LOCALNAME = "informationTable"
 _COVER_LOCALNAME = "edgarSubmission"
-
-
-@dataclass(frozen=True)
-class FilingDocs:
-    """The stored documents for one filing.
-
-    ``primary_doc_path`` always points at a real file. For a notice it
-    points at the ``{accession}.xml`` file, which holds the cover page.
-    """
-
-    ref: FilingRef
-    info_table_path: Path | None    # None for a notice
-    primary_doc_path: Path
 
 
 def download(refs: list[FilingRef], cache: Cache, out_dir: Path) -> list[FilingDocs]:
@@ -93,7 +80,8 @@ def _download_one(ref: FilingRef, cache: Cache, out_dir: Path) -> FilingDocs:
 
 def _read_documents(cache: Cache, dir_url: str) -> tuple[dict[str, bytes], dict[str, str | None]]:
     """Fetch index.json and every .xml document. Return bodies and root local names."""
-    items = ((json.loads(cache.get(dir_url + _INDEX_NAME)).get("directory") or {}).get("item")) or []
+    index = json.loads(cache.get(dir_url + _INDEX_NAME))
+    items = (index.get("directory") or {}).get("item") or []
     names = [
         str(item.get("name"))
         for item in items
@@ -105,12 +93,25 @@ def _read_documents(cache: Cache, dir_url: str) -> tuple[dict[str, bytes], dict[
     for name in names:
         body = cache.get(dir_url + name)
         bodies[name] = body
-        try:
-            localnames[name] = QName(etree.fromstring(body)).localname
-        except etree.XMLSyntaxError:
-            # A directory can hold XML that is not a 13F document. Skip it.
-            localnames[name] = None
+        localnames[name] = root_localname(body)
     return bodies, localnames
+
+
+def root_localname(body: bytes) -> str | None:
+    """Return the local name of the root element, or None when no root parses.
+
+    The parser stops at the first start tag. An information table can be 30 MB,
+    and a full parse here only to read one tag name doubles the parse work.
+    """
+    try:
+        for _event, element in etree.iterparse(
+            io.BytesIO(body), events=("start",), resolve_entities=False, no_network=True
+        ):
+            return QName(element).localname
+    except etree.XMLSyntaxError:
+        # A directory can hold XML that is not a 13F document. Skip it.
+        return None
+    return None
 
 
 def _write_bytes(path: Path, body: bytes) -> None:

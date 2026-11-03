@@ -13,9 +13,9 @@ import time
 
 import httpx
 
+from curator.cache import FetchError
 
-class FetchError(RuntimeError):
-    """A GET did not return 200 after every retry."""
+__all__ = ["FetchError", "Fetcher", "RateLimiter"]
 
 
 class RateLimiter:
@@ -43,24 +43,57 @@ class RateLimiter:
 
 
 _MAX_ATTEMPTS = 5
-_RETRY_STATUSES = frozenset({429, 503})
+# A status in this set is worth another attempt. Every other non-200 status
+# fails at once: a 404 stays a 404 however long the client waits.
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _BACKOFF_SECONDS = (1.0, 2.0, 4.0, 8.0)
+# SEC can send a long Retry-After. The client waits at most this long.
+_MAX_RETRY_AFTER_SECONDS = 60.0
 _TIMEOUT_SECONDS = httpx.Timeout(30.0, connect=10.0)
 
 
 class Fetcher:
-    """One sequential client. Every request carries the contact User-Agent."""
+    """One sequential client. Every request carries the contact User-Agent.
 
-    def __init__(self, user_agent: str, limiter: RateLimiter) -> None:
+    The client opens on the first request. A run that reads every body from
+    the cache then never builds a TLS context.
+    """
+
+    def __init__(
+        self,
+        user_agent: str,
+        limiter: RateLimiter,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._user_agent = user_agent
         self._limiter = limiter
-        self._client = httpx.Client(
-            headers={
-                "User-Agent": user_agent,
-                "Accept-Encoding": "gzip, deflate",
-            },
-            timeout=_TIMEOUT_SECONDS,
-            follow_redirects=True,
-        )
+        self._transport = transport
+        self._client: httpx.Client | None = None
+
+    def _http(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(
+                headers={
+                    "User-Agent": self._user_agent,
+                    "Accept-Encoding": "gzip, deflate",
+                },
+                timeout=_TIMEOUT_SECONDS,
+                follow_redirects=True,
+                transport=self._transport,
+            )
+        return self._client
+
+    def close(self) -> None:
+        """Close the connection pool, if one opened."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def __enter__(self) -> Fetcher:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
     def get(self, url: str) -> bytes:
         """Send one GET. Return the body. Raise FetchError after the last retry."""
@@ -71,7 +104,7 @@ class Fetcher:
             attempts_used = attempt
             self._limiter.acquire()
             try:
-                response = self._client.get(url)
+                response = self._http().get(url)
             except httpx.TransportError as exc:
                 last_status = None
                 last_detail = f"transport error: {exc}"
@@ -85,9 +118,7 @@ class Fetcher:
                 return response.content
             last_status = response.status_code
             last_detail = f"status {response.status_code}"
-            if 400 <= response.status_code < 500 and response.status_code != 429:
-                break
-            if attempt == _MAX_ATTEMPTS:
+            if response.status_code not in _RETRY_STATUSES or attempt == _MAX_ATTEMPTS:
                 break
             delay = _retry_delay(attempt, response.headers.get("Retry-After"))
             _log_retry(url, attempt, last_detail, delay)
@@ -100,9 +131,12 @@ def _retry_delay(attempt: int, retry_after: str | None) -> float:
     """Return the wait before the next attempt in seconds."""
     if retry_after is not None:
         try:
-            return max(0.0, float(int(retry_after)))
+            seconds = float(int(retry_after))
         except ValueError:
+            # An HTTP-date Retry-After falls back to the fixed backoff.
             pass
+        else:
+            return min(max(0.0, seconds), _MAX_RETRY_AFTER_SECONDS)
     return _BACKOFF_SECONDS[min(attempt - 1, len(_BACKOFF_SECONDS) - 1)]
 
 

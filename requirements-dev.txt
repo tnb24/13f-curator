@@ -1,0 +1,6 @@
+# Tests, lint, and the exploration script. The pipeline and the agent need
+# only requirements.txt.
+-r requirements.txt
+pandas==2.2.3
+pytest==8.3.4
+ruff==0.14.0
