@@ -1,4 +1,4 @@
-"""Bonus 1: recover the notice filer's rows from its parent's filing.
+"""Attribution: recover the notice filer's rows from its parent's filing.
 
 A 13F notice carries no holdings. It says the holdings sit in another manager's
 report. This module finds that report, finds the sequence number the parent
@@ -125,12 +125,12 @@ def _find_parent_ref(cache: Cache, cik: str, report_date: str) -> FilingRef | No
     return None
 
 
-def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
+def run_attribution(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     """Attribute the notice filer's rows out of the parent filing."""
     output = Path(output)
-    # The parent is not on the roster, so its documents must not land under
-    # output/filings/, which holds the roster filers only.
-    work = Path(cache.root) / "bonus1"
+    # The parent is not in the input list, so its documents must not land under
+    # output/filings/, which holds the listed filers only.
+    work = Path(cache.root) / "attribution"
     work.mkdir(parents=True, exist_ok=True)
 
     attributed: list[pa.Table] = []
@@ -139,7 +139,7 @@ def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     notices = [
         f for f in dataset.filings.to_pylist() if str(f["form_type"]).startswith("13F-NT")
     ]
-    print(f"curator.bonus1: {len(notices)} notice filing(s)", file=sys.stderr)
+    print(f"curator.attribution: {len(notices)} notice filing(s)", file=sys.stderr)
 
     for notice in notices:
         notice_cik = str(notice["cik"])
@@ -149,7 +149,7 @@ def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
         if not cover.exists():
             cover = output / "filings" / str(int(notice_cik)) / f"{stem}.xml"
         if not cover.exists():
-            print(f"curator.bonus1: no cover page for {accession}", file=sys.stderr)
+            print(f"curator.attribution: no cover page for {accession}", file=sys.stderr)
             continue
 
         for manager in _notice_parents(cover):
@@ -159,7 +159,7 @@ def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
             ref = _find_parent_ref(cache, parent_cik, str(notice["report_period"]))
             if ref is None:
                 print(
-                    f"curator.bonus1: no parent 13F-HR for CIK {parent_cik}",
+                    f"curator.attribution: no parent 13F-HR for CIK {parent_cik}",
                     file=sys.stderr,
                 )
                 continue
@@ -178,7 +178,7 @@ def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
                 )
             ]
             print(
-                f"curator.bonus1: parent {ref.accession} declares {len(sequences)} "
+                f"curator.attribution: parent {ref.accession} declares {len(sequences)} "
                 f"manager(s); the notice maps to sequence {wanted}",
                 file=sys.stderr,
             )
@@ -192,14 +192,14 @@ def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
             ]
             matched = parsed.holdings.filter(pa.array(carries, pa.bool_()))
             print(
-                f"curator.bonus1: the parent holds {parsed.holdings.num_rows} row(s); "
+                f"curator.attribution: the parent holds {parsed.holdings.num_rows} row(s); "
                 f"{matched.num_rows} carry sequence {sequence}",
                 file=sys.stderr,
             )
             if not matched.num_rows:
                 # A justified zero beats an unjustified set of rows.
                 print(
-                    f"curator.bonus1: sequence {sequence} appears in no otherManager "
+                    f"curator.attribution: sequence {sequence} appears in no otherManager "
                     "value, so this module attributes no row",
                     file=sys.stderr,
                 )
@@ -213,5 +213,5 @@ def run_bonus1(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     table = (
         pa.concat_tables(attributed) if attributed else ATTRIBUTED_SCHEMA.empty_table()
     )
-    write_table_atomic(table, output / "bonus_attributed.parquet")
-    print(f"curator.bonus1: wrote {table.num_rows} attributed row(s)", file=sys.stderr)
+    write_table_atomic(table, output / "attributed_holdings.parquet")
+    print(f"curator.attribution: wrote {table.num_rows} attributed row(s)", file=sys.stderr)

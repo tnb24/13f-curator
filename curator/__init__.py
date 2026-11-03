@@ -1,1 +1,1 @@
-"""DSRS Data Curator: EDGAR 13F ingestion pipeline package."""
+"""13F Curator: build a typed 13F holdings dataset from SEC EDGAR."""

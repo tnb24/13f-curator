@@ -38,3 +38,4 @@ def test_the_pipeline_prints_help() -> None:
     done = _run("main.py", "--help")
     assert done.returncode == 0
     assert "--cache-dir" in done.stdout
+    assert "--filers" in done.stdout

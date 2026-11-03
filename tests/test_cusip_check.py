@@ -1,4 +1,4 @@
-"""The two bonus stages, rule by rule. tests/test_pipeline.py runs them whole."""
+"""The CUSIP check, rule by rule. tests/test_pipeline.py runs it whole."""
 
 from __future__ import annotations
 
@@ -9,8 +9,7 @@ import random
 import pyarrow as pa
 import pytest
 
-from curator.bonus1 import _tokens
-from curator.bonus2 import (
+from curator.cusip_check import (
     _assess,
     check_digit,
     check_digit_ok,
@@ -69,21 +68,7 @@ def test_the_assessment_rules_apply_in_order() -> None:
     assert _assess("037833100", {}) == "UNRESOLVED"
 
 
-@pytest.mark.parametrize("value, tokens", [
-    ("1", ["1"]),
-    ("1, 11", ["1", "11"]),
-    ("2,5", ["2", "5"]),
-    (" 3 ,", ["3"]),
-    (None, []),
-    ("", []),
-])
-def test_other_manager_tokens_are_whole(value, tokens) -> None:
-    assert _tokens(value) == tokens
-    if value and "11" in value:
-        assert "1" in _tokens(value) and _tokens(value).count("1") == 1
-
-
-# The columnar paths of bonus 2 must give exactly what the reference rules give.
+# The columnar paths of the CUSIP check must give exactly what the reference rules give.
 
 _LIST_HAZARDS = [
     b"",

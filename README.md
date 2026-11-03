@@ -2,25 +2,24 @@
 
 [![ci](https://github.com/tnb24/13f-curator/actions/workflows/ci.yml/badge.svg)](https://github.com/tnb24/13f-curator/actions/workflows/ci.yml)
 
-A pipeline that turns SEC Form 13F filings into a clean, typed dataset. An LLM agent
-then answers questions about the dataset with SQL, and cites the filings it used.
+A pipeline that builds a clean, typed dataset of 13F holdings from SEC EDGAR for a
+list of investment managers. An LLM agent then answers questions about the dataset
+with SQL, and cites the filings it used.
 
-I built the first version for the DSRS Data Curator Challenge, a data science intern
-screening at the Gies College of Business, University of Illinois, in August 2026.
-This version adds an answer key, a held-out evaluation, and a data-oriented rewrite of
-the slowest paths.
+## What it does
 
-## The problem
-
-- A researcher supplies a roster of 20 investment managers, with a CIK for each.
+- **Input**: `filers.csv`, a list of investment managers by name. A `cik` column is
+  optional.
   - A CIK (Central Index Key) is the ID that SEC EDGAR gives to each filer.
-- Some CIKs on the roster are wrong.
-- The researcher wants every 13F holding for 2026 Q1 and 2026 Q2.
+- **Output**: every 13F holding that those managers reported for 2026 Q1 and 2026 Q2,
+  as two Parquet tables with a fixed schema ([docs/SCHEMA.md](docs/SCHEMA.md)).
   - Form 13F is the quarterly report of equity holdings that large managers file
     with the SEC.
-- The output is two Parquet tables that match a fixed schema
-  ([docs/SCHEMA.md](docs/SCHEMA.md)).
-- An agent answers questions about the tables and lists its sources.
+- **Two extra outputs**: the holdings that a manager reports inside another manager's
+  filing, and a check of each CUSIP against the SEC official 13F list.
+  - A CUSIP is the nine-character ID of a security.
+- **An agent** answers questions about the tables and lists its sources.
+- The bundled `filers.csv` holds 20 large managers, and `output/` holds their dataset.
 
 ## Results
 
@@ -30,7 +29,7 @@ the slowest paths.
 |---|---|
 | Filings | 40 (20 managers × 2 quarters) |
 | Holdings rows | 134,635 |
-| Wrong roster CIKs fixed | 2 of 20 |
+| Managers resolved to SEC filers | 20 of 20 |
 | Second run | all 85 data and XML files byte-identical; all 183 requests from the local response store |
 | Schema check (`verify.py`) | 8 of 8 pass |
 | Tests | 270 pass, with no network and no model |
@@ -47,7 +46,8 @@ against the data ([evals/](evals/)). Each set ran 3 times with
 | Held-out set, 12 questions | 24 of 36 (67%) | 36 of 36 (100%) |
 | Citation recall / precision, both sets | 0.64 / 0.68 | 0.98 / 0.98 |
 
-- The development set holds the challenge's 10 example questions and 13 of mine.
+- The development set holds 10 example questions from the original challenge and 13
+  of mine.
   Its failures shaped the prompt, so it is not a fair test on its own.
 - No result on the held-out set changed the prompt or the code. Twelve questions is
   a small sample.
@@ -80,15 +80,23 @@ Method and evidence for each number: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 ### The pipeline
 
 ```
-filers.csv
-  -> curator/cik.py        match each roster name to an EDGAR entity
-  -> curator/discover.py   list the in-scope filings from the submissions API
-  -> curator/download.py   store the XML of each filing under output/filings/
-  -> curator/parse.py      read each filing into Arrow columns, in parallel processes
-  -> curator/write.py      write output/filings.parquet and output/holdings.parquet
-  -> curator/bonus1.py     recover holdings that a notice filer reports in another filing
-  -> curator/bonus2.py     check each 2026 Q2 CUSIP against the SEC official list
+filers.csv (manager names)
+  -> curator/cik.py           resolve each manager name to its SEC filer
+  -> curator/discover.py      list the in-scope filings from the submissions API
+  -> curator/download.py      store the XML of each filing under output/filings/
+  -> curator/parse.py         read each filing into Arrow columns, in parallel processes
+  -> curator/write.py         write output/filings.parquet and output/holdings.parquet
+  -> curator/attribution.py   recover holdings that a notice filer reports in another filing
+  -> curator/cusip_check.py   check each 2026 Q2 CUSIP against the SEC official list
 ```
+
+- **Filers resolve by name.** A hand-typed CIK can be stale, or it can belong to
+  another filer. So the pipeline never uses an input CIK to find a filer. It matches
+  each name against SEC's name-to-CIK file, and it keeps only the candidates that
+  filed a 13F in scope. `output/filers.csv` records whether each input CIK agreed.
+- The bundled list shows why. Two of its 20 CIKs belong to other live 13F filers,
+  and each of those filers has two filings in scope. A count of filings cannot catch
+  that, but resolution by name replaces both.
 
 - One HTTP client sends all requests, one at a time, at 5 requests per second.
   [SEC permits 10](https://www.sec.gov/about/developer-resources).
@@ -150,6 +158,7 @@ requires it.
 
 ```bash
 python main.py --user-agent "Your Name you@example.com"
+python main.py --user-agent "..." --filers my_managers.csv  # your own list of managers
 python verify.py                    # check the Parquet tables against docs/SCHEMA.md
 python -m pytest -q                 # run the tests
 python -m evals.run --set holdout   # grade the agent against the held-out answer key
@@ -182,7 +191,7 @@ evals/           answer keys, grader, and recorded runs
 scripts/         exploration, benchmarks, security demo
 tests/           unit and end-to-end tests; tests/world.py is a synthetic EDGAR
 docs/            output schema, example questions, performance notes
-filers.csv       input roster of 20 managers
+filers.csv       the bundled list of 20 managers
 output/          the dataset: Parquet tables, quality report, request manifest
 verify.py        schema checker
 ```
@@ -202,11 +211,21 @@ verify.py        schema checker
 - **One model.** I tested one model on one provider. The latency figures include that
   provider's network and queue time.
 - **The query timeout interrupts DuckDB only.** It does not cap memory or CPU.
+- **Fixed scope.** The quarters (2026 Q1 and Q2) and the filing-date cutoff
+  (2026-08-18) are constants in `curator/scope.py`. The cutoff fixes a snapshot of
+  EDGAR, so a rerun writes the same bytes.
+
+## Origin
+
+The first version was my entry to the DSRS Data Curator Challenge, a data science
+intern screening at the Gies College of Business, University of Illinois, in August
+2026. This version adds an answer key, a held-out evaluation, and a data-oriented
+rewrite of the slowest paths.
+
+The challenge supplied `verify.py`, `filers.csv`, `docs/SCHEMA.md`, the example
+questions, and the first version of `agents/llm.py`. This version of `agents/llm.py`
+keeps that module's interface and replaces the OpenAI SDK with httpx.
 
 ## License
 
 [MIT](LICENSE)
-
-The challenge organisers supplied `verify.py`, `filers.csv`, `docs/SCHEMA.md`, the
-example questions, and the first version of `agents/llm.py`. This version of
-`agents/llm.py` keeps that module's interface and replaces the OpenAI SDK with httpx.

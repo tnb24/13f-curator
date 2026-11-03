@@ -102,7 +102,7 @@ def test_a_collision_needs_the_13f_test(tmp_path):
     cache = _fake_cache(tmp_path)
     roster = [{"fund_name": "Baupost Group LLC/MA", "cik": _FILER_CIK}]
 
-    records = cik.verify(roster, cache)
+    records = cik.resolve_filers(roster, cache)
 
     assert len(records) == 1
     record = records[0]
@@ -125,11 +125,19 @@ def _files_13f(name: str) -> bytes:
     return _submissions_body(name, ["13F-HR"], ["2026-06-30"], ["2026-08-10"])
 
 
-def test_a_wrong_roster_cik_is_corrected_by_name(tmp_path):
+def test_an_input_cik_that_names_another_filer_is_corrected_by_name(tmp_path):
     cache = _cache_with(tmp_path, "ALPHA CAPITAL LLC:0000000111:\n",
                         {"0000000111": _files_13f("ALPHA CAPITAL LLC")})
-    record = cik.verify([{"fund_name": "Alpha Capital LLC", "cik": "999"}], cache)[0]
+    record = cik.resolve_filers([{"fund_name": "Alpha Capital LLC", "cik": "999"}], cache)[0]
     assert (record.cik, record.cik_source) == ("0000000111", "corrected")
+
+
+def test_a_name_with_no_input_cik_resolves(tmp_path):
+    cache = _cache_with(tmp_path, "ALPHA CAPITAL LLC:0000000111:\n",
+                        {"0000000111": _files_13f("ALPHA CAPITAL LLC")})
+    for row in ({"fund_name": "Alpha Capital LLC"}, {"fund_name": "Alpha Capital LLC", "cik": ""}):
+        record = cik.resolve_filers([row], cache)[0]
+        assert (record.cik, record.cik_source) == ("0000000111", "resolved")
 
 
 def test_the_fuzzy_stage_runs_only_when_no_exact_candidate_files(tmp_path):
@@ -140,7 +148,7 @@ def test_the_fuzzy_stage_runs_only_when_no_exact_candidate_files(tmp_path):
         "0000000001": _submissions_body("TUDOR INVESTMENT CORP", ["D"], [""], ["2020-01-01"]),
         "0000000002": _files_13f("TUDOR INVESTMENT CORP ET AL"),
     })
-    record = cik.verify([{"fund_name": "Tudor Investment Corp", "cik": "1"}], cache)[0]
+    record = cik.resolve_filers([{"fund_name": "Tudor Investment Corp", "cik": "1"}], cache)[0]
     assert record.cik == "0000000002"
     assert record.edgar_name == "TUDOR INVESTMENT CORP ET AL"
 
@@ -150,7 +158,7 @@ def test_no_filing_candidate_raises_and_names_what_it_tried(tmp_path):
         "0000000005": _submissions_body("OMEGA FUND LP", ["D"], [""], ["2020-01-01"]),
     })
     with pytest.raises(LookupError, match=r"0000000005\(100\.0\)"):
-        cik.verify([{"fund_name": "Omega Fund LP", "cik": "5"}], cache)
+        cik.resolve_filers([{"fund_name": "Omega Fund LP", "cik": "5"}], cache)
 
 
 def test_a_late_filing_does_not_confirm_a_candidate(tmp_path):
@@ -158,7 +166,7 @@ def test_a_late_filing_does_not_confirm_a_candidate(tmp_path):
     late = _submissions_body("LATE LLC", ["13F-HR"], ["2026-06-30"], ["2026-08-19"])
     cache = _cache_with(tmp_path, "LATE LLC:0000000007:\n", {"0000000007": late})
     with pytest.raises(LookupError):
-        cik.verify([{"fund_name": "Late LLC", "cik": "7"}], cache)
+        cik.resolve_filers([{"fund_name": "Late LLC", "cik": "7"}], cache)
 
 
 def test_filers_csv_sorts_by_integer_cik(tmp_path):

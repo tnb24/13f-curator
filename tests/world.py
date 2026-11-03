@@ -1,12 +1,12 @@
 """A small synthetic EDGAR, served from memory, for end-to-end pipeline tests.
 
-The world holds three roster filers and one parent manager:
+The world holds three listed filers and one parent manager:
 
-    Alpha Capital LLC     CIK 1000001  roster CIK right; 13F-HR in Q1 and Q2
-    Beta Partners LP      CIK 1000002  roster says 1000099; two lookup entries
+    Alpha Capital LLC     CIK 1000001  input CIK right; 13F-HR in Q1 and Q2
+    Beta Partners LP      CIK 1000002  input says 1000099; two lookup entries
                                        share its name, and only 1000002 files
     Gamma Advisors Inc    CIK 1000003  13F-HR in Q1, 13F-NT in Q2
-    Delta Holdings LLC    CIK 1000004  not on the roster; its Q2 13F-HR holds
+    Delta Holdings LLC    CIK 1000004  not in the list; its Q2 13F-HR holds
                                        Gamma's rows as other-manager sequence 1
 
 `bodies()` returns every URL the pipeline requests, mapped to its body.

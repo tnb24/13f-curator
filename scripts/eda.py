@@ -35,7 +35,7 @@ CACHE_HTTP_DIR = ROOT / ".cache" / "http"
 
 USER_AGENT = os.environ.get("SEC_USER_AGENT", "").strip()
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{}.json"
-WRONG_ROSTER_CIKS = ("0000854157", "0001697748")
+MISMATCHED_INPUT_CIKS = ("0000854157", "0001697748")
 IN_SCOPE_FORMS = frozenset({"13F-HR", "13F-HR/A", "13F-NT", "13F-NT/A"})
 REPORT_PERIODS = frozenset({"2026-03-31", "2026-06-30"})
 FILING_DATE_CUTOFF = "2026-08-18"
@@ -935,10 +935,10 @@ def _read_submissions(cik: str) -> bytes | None:
     return body
 
 
-def c18_wrong_roster_ciks(filings: list[FilingDoc]) -> None:
-    print("C18: the two wrong roster CIKs resolve to real 13F filers")
+def c18_mismatched_input_ciks(filings: list[FilingDoc]) -> None:
+    print("C18: the two mismatched input CIKs belong to other live 13F filers")
     corpus_ciks = {filing.directory.zfill(10) for filing in filings}
-    for cik in WRONG_ROSTER_CIKS:
+    for cik in MISMATCHED_INPUT_CIKS:
         body = _read_submissions(cik)
         if body is None:
             continue
@@ -952,7 +952,7 @@ def c18_wrong_roster_ciks(filings: list[FilingDoc]) -> None:
             f"{'yes' if cik in corpus_ciks else 'no'}"
         )
     print(
-        "  Conclusion: each wrong CIK belongs to a live filer with two in-scope "
+        "  Conclusion: each mismatched CIK belongs to a live filer with two in-scope "
         "filings, so a 40-filing count alone cannot catch a wrong CIK."
     )
 
@@ -1079,16 +1079,16 @@ FINDINGS = [
     "and let agent SQL apply upper().",
     "[C9][C19] All 134635 CUSIPs are exactly nine characters: 17434 start with 0 and "
     "11137 start with a letter as CINS codes. No value drops a character, so the "
-    "Bonus 2 length-error class stays empty this quarter. Store as filed and record "
+    "CUSIP check length-error class stays empty this quarter. Store as filed and record "
     "any future length exception in the quality report.",
     "[C11] Rows carry otherManager on 85510 of 134635 rows across twenty distinct "
     "values. Refs appear as bare numbers 1 to 13, as packed lists like '2,1' in "
     "Citadel 0001104659-26-062472, as spaced lists like '1, 2, 3, 4, 5' in Starboard "
     "0000921895-26-001402, and as literal '0' on 6353 Renaissance rows whose cover "
-    "lists no managers. Store the string unchanged; Bonus 1 splits both spellings.",
+    "lists no managers. Store the string unchanged; attribution splits both spellings.",
     "[C11] Cover pages write manager lists in two shapes: otherManagers2Info with a "
     "sequenceNumber on sixteen filings and plain otherManagersInfo on the two "
-    "Balyasny filings. AQR declares 13 managers yet lists 14 names. Bonus 1 must "
+    "Balyasny filings. AQR declares 13 managers yet lists 14 names. Attribution must "
     "read both shapes and reconcile the declared count.",
     "[C14] Twenty-two of forty main files declare no prolog encoding, eight declare "
     "lowercase utf-8, and ten declare UTF-8. Case-sensitive matching on the prolog "
@@ -1097,7 +1097,7 @@ FINDINGS = [
     "[C16] Nine of forty filings are not plain holdings reports: eight 13F COMBINATION "
     "REPORT filings from AQR, Balyasny, Millennium, and Man Group, plus the Pershing "
     "Square 13F NOTICE 0001172661-26-003777. A combination merges several managers' "
-    "books, so Bonus 1 attribution starts there. The notice yields one filing record "
+    "books, so attribution starts there. The notice yields one filing record "
     "and zero holding rows.",
     "[C15] Every one of the 134635 rows carries votingAuthority with exactly three "
     "children: Sole, Shared, and None. The third child is literally named None, so "
@@ -1111,10 +1111,10 @@ FINDINGS = [
     "tableValueTotal equals the sum of value, in thirty-nine of thirty-nine holdings "
     "filings. Totals reconcile today, so a later mismatch signals a parser bug rather "
     "than filer noise. Keep the comparison as a quality check.",
-    "[C18] Both wrong roster CIKs resolve to live 13F filers with two in-scope "
+    "[C18] Both mismatched input CIKs belong to live 13F filers with two in-scope "
     "filings each: STATE OF WISCONSIN INVESTMENT BOARD at 0000854157 and ARK "
     "Investment Management LLC at 0001697748. The 40-filing count alone cannot catch "
-    "a swapped CIK. Only the roster name check catches it.",
+    "a swapped CIK. Only resolution by name catches it.",
 ]
 
 
@@ -1145,7 +1145,7 @@ def main() -> int:
     c15_voting_children(filings)
     c16_report_types(filings)
     c17_value_magnitude(filings)
-    c18_wrong_roster_ciks(filings)
+    c18_mismatched_input_ciks(filings)
     c19_cusip_lengths(filings)
     extra_observations(filings)
     print()

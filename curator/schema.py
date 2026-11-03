@@ -1,6 +1,6 @@
 """The two output tables, as Arrow schemas. docs/SCHEMA.md is the contract.
 
-Parse builds columns against these schemas, write stores them, and the bonus
+Parse builds columns against these schemas, write stores them, and the extra
 stages read them. One definition serves all three. The column order matches
 docs/SCHEMA.md, and the nullable flag is part of the contract: verify.py reads
 it back field by field.
@@ -54,7 +54,7 @@ HOLDINGS_SCHEMA = pa.schema(
     ]
 )
 
-# Bonus 1 stores parent rows with the notice filer they belong to.
+# Attribution stores parent rows with the notice filer they belong to.
 ATTRIBUTED_SCHEMA = pa.schema(
     [*HOLDINGS_SCHEMA, pa.field("attributed_to_cik", pa.string(), nullable=False)]
 )

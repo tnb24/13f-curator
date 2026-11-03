@@ -88,7 +88,7 @@ def test_a_table_with_the_wrong_schema_never_reaches_disk(tmp_path) -> None:
     assert not (tmp_path / "holdings.parquet").exists()
 
 
-def test_the_bonus_writer_agrees(tmp_path) -> None:
+def test_the_attribution_writer_agrees(tmp_path) -> None:
     row = {**_holding("023135106", 1000), "attributed_to_cik": "0001336528"}
     table = pa.Table.from_pylist([row], schema=ATTRIBUTED_SCHEMA)
     write_table_atomic(table, tmp_path / "a.parquet")

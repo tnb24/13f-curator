@@ -1,4 +1,4 @@
-"""Bonus 2: check every 2026 Q2 CUSIP against the official 13F list.
+"""CUSIP check: match every 2026 Q2 CUSIP against the official 13F list.
 
 Every unmatched value carries a label and the evidence behind it.
 
@@ -294,19 +294,19 @@ def _write_bytes(data: bytes, path: Path) -> None:
             temp.unlink()
 
 
-def run_bonus2(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
+def run_cusip_check(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     """Check every 2026 Q2 CUSIP against the official 13F list."""
     output = Path(output)
 
     q2 = official_table(cache.get(_Q2_URL))
     q1 = official_table(cache.get(_Q1_URL))
     print(
-        f"curator.bonus2: official list holds {q2.num_rows} Q2 CUSIPs "
+        f"curator.cusip_check: official list holds {q2.num_rows} Q2 CUSIPs "
         f"and {q1.num_rows} Q1 CUSIPs",
         file=sys.stderr,
     )
     for sample in q2.slice(0, 5).to_pylist():
-        print(f"curator.bonus2:   sample {sample}", file=sys.stderr)
+        print(f"curator.cusip_check:   sample {sample}", file=sys.stderr)
 
     # One row per (filing, stored CUSIP) pair, sorted. use_threads=False keeps
     # the aggregation ordered, so "first" is the first row in source order.
@@ -323,7 +323,7 @@ def run_bonus2(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     # Rule out our own error before any comparison starts.
     bad_length = pc.sum(pc.if_else(pc.not_equal(pc.utf8_length(key), 9), rows, 0)).as_py()
     print(
-        f"curator.bonus2: {quarter.num_rows} holdings in {_QUARTER}; "
+        f"curator.cusip_check: {quarter.num_rows} holdings in {_QUARTER}; "
         f"{bad_length or 0} fail the 9-character check",
         file=sys.stderr,
     )
@@ -354,13 +354,13 @@ def run_bonus2(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
         ],
         names=_FIELDS,
     )
-    _write_bytes(csv_bytes(report), output / "bonus_cusip_validation.csv")
+    _write_bytes(csv_bytes(report), output / "cusip_check.csv")
 
     matched = report.num_rows - len(unmatched)
     print(
-        f"curator.bonus2: {report.num_rows} pairs; {matched} matched, "
+        f"curator.cusip_check: {report.num_rows} pairs; {matched} matched, "
         f"{len(unmatched)} unmatched",
         file=sys.stderr,
     )
     for label, count in sorted(Counter(labels).items()):
-        print(f"curator.bonus2:   {label}: {count}", file=sys.stderr)
+        print(f"curator.cusip_check:   {label}: {count}", file=sys.stderr)

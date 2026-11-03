@@ -64,8 +64,11 @@ interpreter. Its manifest records `elapsed_seconds` for the run.
 ## Output identity
 
 - All 85 deterministic files are byte-identical to the output of `d262efd`, on every
-  run. They are the two Parquet tables, the two bonus files, the corrected roster,
+  run. They are the two Parquet tables, the two extra outputs, the resolved filer list,
   the quality report, and 79 XML files.
+- Two of those files have new names. `bonus_attributed.parquet` is now
+  `attributed_holdings.parquet`, and `bonus_cusip_validation.csv` is now
+  `cusip_check.csv`. Their bytes are the same.
 - `manifest.json` is not identical, because it records a start time and elapsed times.
   On a warm run the original also makes 182 requests, not 183: its derived lookup copy
   replaces one request.
@@ -76,24 +79,25 @@ interpreter. Its manifest records `elapsed_seconds` for the run.
 
 ### Where the time went
 
-Stage medians, in seconds, from the five interleaved warm runs:
+Stage medians, in seconds, from the five interleaved warm runs. The original
+names three of these stages `verify`, `bonus1`, and `bonus2`.
 
 | Stage | Before | After |
 |---|---|---|
-| verify | 4.58 | 2.52 |
+| resolve | 4.58 | 2.52 |
 | discover | 0.03 | 0.03 |
 | download | 2.40 | 0.25 |
 | parse | 10.04 | 1.05 |
 | write | 1.06 | 0.18 |
-| bonus1 | 0.02 | 0.02 |
-| bonus2 | 0.46 | 0.22 |
+| attribution | 0.02 | 0.02 |
+| cusip_check | 0.46 | 0.22 |
 
 Component medians, in seconds, from five repeats each:
 
 | Component | Before | After |
 |---|---|---|
 | Parse the raw name-to-CIK lookup file | 8.94 | 1.36 |
-| Fuzzy search for one roster name (Tudor) | 1.37 | 1.37 |
+| Fuzzy search for one manager name (Tudor) | 1.37 | 1.37 |
 | Read the root tag of every stored XML file | 2.07 | 0.05 |
 | Build the HTTP client on a run with no request | 0.42 | 0.00 |
 | Import `curator.parse`, interpreter included | 0.49 | 0.36 |
@@ -165,7 +169,7 @@ Component medians, in seconds, from five repeats each:
     `QName`.
   - Each row builds three child maps, not six.
   - One filing is one task in a process pool. Its workers start at the beginning of
-    the run and import lxml and pyarrow while the main process verifies CIKs. The
+    the run and import lxml and pyarrow while the main process resolves filers. The
     largest files go first.
 - **Not columnar.** The parser still walks each holding element in Python. Each row
   builds three child maps and appends Python values to the column lists. Only the
@@ -223,9 +227,9 @@ the import there.
   `sys.modules`, or a pyarrow upgrade. An upgrade changes the `created_by` field of
   each Parquet file, so the output is no longer byte-identical to the original.
 
-### P8. Bonus 2 works on columns
+### P8. The CUSIP check works on columns
 
-`curator/bonus2.py`
+`curator/cusip_check.py`
 
 - **Before.** A Python dict per holding row (68,070 rows), a dict per (filing, CUSIP)
   pair, a line loop over each official list, and `csv.DictWriter`: 0.46 s.
@@ -244,7 +248,7 @@ the import there.
   string, integer, and boolean columns, and a null becomes an empty field. A table
   with any other column type goes through `csv.writer`, because Arrow and Python
   format floats differently.
-- **Evidence.** The CSV is byte-identical. `tests/test_bonus.py` compares each fast
+- **Evidence.** The CSV is byte-identical. `tests/test_cusip_check.py` compares each fast
   path with its reference. The cases are 18 list hazards, 2,000 random lists, 300
   random Latin-1 bodies, and 3,003 random CUSIPs. It also compares random tables,
   nulls, quoted headers, and floats against the `csv` module.
@@ -263,12 +267,12 @@ table gives no figures.
 | A thread pool for parse | slower than processes: the row walk holds the GIL |
 | An Arrow split of the whole lookup text | slower than `str.splitlines`: one 40 MB string costs more to convert |
 | A run-length `np.repeat` for the span mask | slower than an int8 running sum |
-| Give the parsed submissions JSON from verify to discover | saves milliseconds only, and couples two stages |
+| Give the parsed submissions JSON from resolve to discover | saves milliseconds only, and couples two stages |
 
 ### What is left
 
-Verify takes 2.5 s. Two parts, measured on their own, take most of it: the lookup
-index (1.4 s) and the one roster name that needs a fuzzy search (Tudor, 1.4 s).
+Resolve takes 2.5 s. Two parts, measured on their own, take most of it: the lookup
+index (1.4 s) and the one manager name that needs a fuzzy search (Tudor, 1.4 s).
 rapidfuzz needs Python strings, so each candidate that passes the length bound
 becomes a Python string first.
 
@@ -389,7 +393,7 @@ model, is the next step.
 | `.cache/curator.duckdb`, copy of both tables | kept between runs, rebuilt on file time | gone; A3 builds views per Engine |
 | `agents/resolve.py` process-wide name dictionary | never invalidated | gone; A1 owns the index |
 | `.cache/http`, raw EDGAR responses | kept | kept |
-| `output/filings/` and `.cache/bonus1/`, raw XML copies | kept | kept |
+| `output/filings/` and `.cache/attribution/`, raw XML copies | kept | kept |
 
 The raw response store stays. SEC's fair-access rules ask clients not to fetch the
 same document again, and the byte-identical rebuild depends on fixed inputs. The

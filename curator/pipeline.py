@@ -23,10 +23,10 @@ from collections.abc import Iterator
 from concurrent.futures import Executor, ProcessPoolExecutor
 from pathlib import Path
 
-from curator.bonus1 import run_bonus1
-from curator.bonus2 import run_bonus2
+from curator.attribution import run_attribution
 from curator.cache import Cache, Manifest, Source
-from curator.cik import verify, write_filers_csv
+from curator.cik import resolve_filers, write_filers_csv
+from curator.cusip_check import run_cusip_check
 from curator.discover import discover
 from curator.download import download
 from curator.http import Fetcher, RateLimiter
@@ -46,20 +46,20 @@ UA_PATTERN = re.compile(r"^\S.*\s+[^@\s]+@[^@\s]+\.[a-z]{2,}\s*$", re.I)
 
 
 def load_filers(path: Path = FILERS) -> list[dict[str, str]]:
-    """The roster the researcher supplied. At least one CIK in here is wrong."""
+    """The managers to collect: a `fund_name` column and an optional `cik` column."""
     with path.open(newline="") as fh:
         return list(csv.DictReader(fh))
 
 
-def _run_bonus(function, name: str, records, cache, output) -> None:
-    """Run one bonus module. A bonus failure never stops the core pipeline.
+def _run_extra(function, name: str, records, cache, output) -> None:
+    """Run one extra stage. A failure there never stops the core pipeline.
 
     The two Parquet tables are already on disk by this point, so a traceback
-    here costs the bonus only.
+    here costs the extra output only.
     """
     try:
         function(records, cache, output)
-    except Exception:  # A bonus failure must never cost the core tables.
+    except Exception:  # An extra stage must never cost the core tables.
         print(f"main: {name} failed; the core output stands", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
 
@@ -82,12 +82,12 @@ def run(
 ) -> None:
     """Build the dataset, one step at a time, over the shared cache.
 
-        1. verify the CIKs against SEC's lookup file      curator/cik.py
+        1. resolve each manager name to its SEC filer     curator/cik.py
         2. find in-scope filings via the submissions API  curator/discover.py
         3. download the filings through the cache         curator/download.py
         4. parse every filing into records and holdings   curator/parse.py
         5. write output/filings.parquet and holdings      curator/write.py
-        6. run the two bonus stages                       curator/bonus1.py, bonus2.py
+        6. run the two extra stages     curator/attribution.py, curator/cusip_check.py
         7. record every request in output/manifest.json   curator/cache.py
 
     `fetcher` replaces the EDGAR client and `roster` replaces filers.csv. The
@@ -116,7 +116,7 @@ def _build(cache: Cache, manifest: Manifest, output: Path, roster: Path, workers
     filings_dir.mkdir(parents=True, exist_ok=True)
 
     # The parse workers start now. Each one imports lxml and pyarrow while this
-    # process verifies CIKs, so no parse task waits for an interpreter start.
+    # process resolves filers, so no parse task waits for an interpreter start.
     pool = ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
     try:
         if pool is not None:
@@ -136,11 +136,11 @@ def _stages(
     filings_dir: Path,
     pool: Executor | None,
 ) -> None:
-    with _stage("verify"):
-        filers = verify(load_filers(roster), cache)
+    with _stage("resolve"):
+        filers = resolve_filers(load_filers(roster), cache)
     corrected = sum(1 for filer in filers if filer.cik_source == "corrected")
     print(
-        f"main: verified {len(filers)} filers, corrected {corrected} CIKs",
+        f"main: resolved {len(filers)} filers; {corrected} input CIKs named another filer",
         file=sys.stderr,
     )
     write_filers_csv(filers, output / "filers.csv")
@@ -170,10 +170,10 @@ def _stages(
         file=sys.stderr,
     )
 
-    with _stage("bonus1"):
-        _run_bonus(run_bonus1, "bonus1", records, cache, output)
-    with _stage("bonus2"):
-        _run_bonus(run_bonus2, "bonus2", records, cache, output)
+    with _stage("attribution"):
+        _run_extra(run_attribution, "attribution", records, cache, output)
+    with _stage("cusip_check"):
+        _run_extra(run_cusip_check, "cusip_check", records, cache, output)
 
     manifest_path = output / "manifest.json"
     manifest.write(manifest_path)
@@ -186,6 +186,8 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--user-agent", required=True,
                     help='required by SEC: "FirstName LastName email@example.com"')
+    ap.add_argument("--filers", type=Path, default=FILERS,
+                    help="CSV of managers: fund_name, and optionally cik (default: filers.csv)")
     ap.add_argument("--output", type=Path, default=OUTPUT)
     ap.add_argument("--cache-dir", type=Path, default=CACHE_DIR,
                     help="where raw EDGAR responses are kept (default: .cache/)")
@@ -199,6 +201,6 @@ def main() -> int:
         )
 
     args.output.mkdir(parents=True, exist_ok=True)
-    run(args.user_agent, args.output, args.cache_dir)
+    run(args.user_agent, args.output, args.cache_dir, roster=args.filers)
     return 0
 

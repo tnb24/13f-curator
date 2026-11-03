@@ -1,9 +1,14 @@
-"""CIK verification: resolve every roster fund name to a 13F-filing entity.
+"""Filer resolution: map every manager name in the input to its SEC filer.
 
-The roster names are right and the roster CIKs are not. This module reads
-EDGAR's name-to-CIK lookup file (see `curator/lookup.py`), narrows each roster
-row to candidate entities, and confirms every candidate against the
-submissions API. A candidate passes only when it filed a 13F in scope.
+A hand-typed CIK can be stale, or it can belong to another filer. So this
+module finds each filer by name only. It reads EDGAR's name-to-CIK lookup file
+(see `curator/lookup.py`), narrows each name to candidate entities, and
+confirms every candidate against the submissions API. A candidate passes only
+when it filed a 13F in scope.
+
+A CIK in the input is never used to find the filer. `cik_source` records how
+it compares with the result: "given" when it agrees, "corrected" when it names
+another filer, and "resolved" when the input has no CIK.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from curator.scope import (
     SUBMISSIONS_URL,
 )
 
-__all__ = ["FilerRecord", "load_lookup", "normalise", "verify", "write_filers_csv"]
+__all__ = ["FilerRecord", "load_lookup", "normalise", "resolve_filers", "write_filers_csv"]
 
 _LOOKUP_URL = "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt"
 _EXACT_SCORE = 100.0
@@ -34,12 +39,12 @@ def load_lookup(cache: Cache) -> LookupIndex:
     return LookupIndex.from_body(cache.get(_LOOKUP_URL))
 
 
-def verify(roster: list[dict[str, str]], cache: Cache) -> list[FilerRecord]:
-    """Return one FilerRecord per roster row, in roster order."""
+def resolve_filers(roster: list[dict[str, str]], cache: Cache) -> list[FilerRecord]:
+    """Return one FilerRecord per input row, in input order."""
     lookup = load_lookup(cache)
     records: list[FilerRecord] = []
     for row in roster:
-        record = _verify_row(row, lookup, cache)
+        record = _resolve_row(row, lookup, cache)
         records.append(record)
         print(
             f"curator.cik: {record.fund_name} -> {record.cik} "
@@ -49,8 +54,8 @@ def verify(roster: list[dict[str, str]], cache: Cache) -> list[FilerRecord]:
     return records
 
 
-def _verify_row(row: dict[str, str], lookup: LookupIndex, cache: Cache) -> FilerRecord:
-    """Resolve one roster row through the exact, confirm, and fuzzy stages."""
+def _resolve_row(row: dict[str, str], lookup: LookupIndex, cache: Cache) -> FilerRecord:
+    """Resolve one input row through the exact, confirm, and fuzzy stages."""
     fund_name = row["fund_name"]
     given_cik = str(row.get("cik") or "").strip()
     target = normalise(fund_name)
@@ -73,11 +78,12 @@ def _verify_row(row: dict[str, str], lookup: LookupIndex, cache: Cache) -> Filer
         )
 
     selected_cik, edgar_name = _select(passing)
-    source = (
-        "given"
-        if given_cik.isdigit() and int(given_cik) == int(selected_cik)
-        else "corrected"
-    )
+    if not given_cik:
+        source = "resolved"
+    elif given_cik.isdigit() and int(given_cik) == int(selected_cik):
+        source = "given"
+    else:
+        source = "corrected"
     return FilerRecord(
         fund_name=fund_name,
         cik=selected_cik.zfill(10),

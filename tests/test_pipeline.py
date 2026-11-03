@@ -20,8 +20,8 @@ from tests import world
 OUTPUTS = (
     "filings.parquet",
     "holdings.parquet",
-    "bonus_attributed.parquet",
-    "bonus_cusip_validation.csv",
+    "attributed_holdings.parquet",
+    "cusip_check.csv",
     "filers.csv",
     "quality_report.json",
 )
@@ -56,10 +56,10 @@ def test_every_table_matches_its_schema(built) -> None:
     _, output, _ = built
     assert pq.read_schema(output / "filings.parquet").equals(FILINGS_SCHEMA)
     assert pq.read_schema(output / "holdings.parquet").equals(HOLDINGS_SCHEMA)
-    assert pq.read_schema(output / "bonus_attributed.parquet").equals(ATTRIBUTED_SCHEMA)
+    assert pq.read_schema(output / "attributed_holdings.parquet").equals(ATTRIBUTED_SCHEMA)
 
 
-def test_a_wrong_roster_cik_is_corrected(built) -> None:
+def test_an_input_cik_that_names_another_filer_is_corrected(built) -> None:
     _, output, _ = built
     with (output / "filers.csv").open(newline="") as handle:
         rows = {row["fund_name"]: row for row in csv.DictReader(handle)}
@@ -100,21 +100,21 @@ def test_holdings_keep_filing_order_then_source_order(built) -> None:
     assert alpha_q2[0]["voting_sole"] == 12
 
 
-def test_bonus1_attributes_whole_sequence_tokens_only(built) -> None:
+def test_attribution_takes_whole_sequence_tokens_only(built) -> None:
     _, output, _ = built
-    rows = pq.read_table(output / "bonus_attributed.parquet").to_pylist()
+    rows = pq.read_table(output / "attributed_holdings.parquet").to_pylist()
     # Sequence 1 matches "1" and "2, 1". It must not match "11".
     assert [(r["name_of_issuer"], r["other_manager"]) for r in rows] == [
         ("APPLE INC", "1"), ("ACME WIDGET CO", "2, 1"),
     ]
     assert {r["attributed_to_cik"] for r in rows} == {"0001000003"}
-    # The parent is not on the roster, so its documents stay out of output/filings.
+    # The parent is not in the input list, so its documents stay out of output/filings.
     assert not (output / "filings" / "1000004").exists()
 
 
-def test_bonus2_labels_every_unmatched_cusip(built) -> None:
+def test_the_cusip_check_labels_every_unmatched_cusip(built) -> None:
     _, output, _ = built
-    with (output / "bonus_cusip_validation.csv").open(newline="") as handle:
+    with (output / "cusip_check.csv").open(newline="") as handle:
         rows = {row["cusip"]: row for row in csv.DictReader(handle)}
     assert rows["037833100"]["on_official_list"] == "True"
     assert rows["037833100"]["rows"] == "2"  # the share row and the call row

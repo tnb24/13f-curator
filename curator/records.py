@@ -12,11 +12,11 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class FilerRecord:
-    """One roster row after CIK verification."""
+    """One input row after filer resolution."""
 
     fund_name: str      # exactly as supplied
     cik: str            # zero-padded to 10
-    cik_source: str     # "given" or "corrected"
+    cik_source: str     # "given", "corrected", or "resolved" (no input CIK)
     edgar_name: str     # entity name from the submissions API
 
 
