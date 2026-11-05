@@ -21,12 +21,25 @@ Checks run in order:
 String literals are blanked before checks 3 and 4, so
 `WHERE upper(put_call) = 'CALL'` passes even though "call" is forbidden as a
 keyword.
+
+`check` says that the statement is safe. `check_facts` says that the statement
+fits the dataset and the question. `check_facts` reads the parse tree that
+`inspect` built, so it adds no second parse. One walk over the tree requires
+that:
+
+- every cusip, fund_name, and report_quarter literal exists in the dataset;
+- every cusip literal is one that the user message listed;
+- no filter tests name_of_issuer against a text literal;
+- no GROUP BY splits a fund by accession_number, or groups by cik alone;
+- the statement filters on each quarter that the question spells out.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Collection
+from dataclasses import dataclass
 
 import duckdb
 
@@ -286,8 +299,21 @@ def _check_relations(statement: dict) -> None:
                 raise SQLRejected(f"qualified table name {qualified!r} is not allowed")
 
 
+@dataclass(frozen=True)
+class Checked:
+    """A statement that passed `inspect`, and the parse tree that proved it."""
+
+    sql: str
+    tree: dict
+
+
 def check(sql: str, conn: duckdb.DuckDBPyConnection) -> str:
-    """Return a safe SQL string. Raise SQLRejected with a reason.
+    """Return a safe SQL string. Raise SQLRejected with a reason."""
+    return inspect(sql, conn).sql
+
+
+def inspect(sql: str, conn: duckdb.DuckDBPyConnection) -> Checked:
+    """Return the safe statement and its parse tree. Raise SQLRejected with a reason.
 
     `conn` parses the statement through json_serialize_sql and runs nothing.
     Any DuckDB connection works; the agent passes a cursor of its engine.
@@ -336,4 +362,231 @@ def check(sql: str, conn: duckdb.DuckDBPyConnection) -> str:
     # Check 8: cap the row count.
     if not _has_top_level_limit(parsed):
         statement_text = f"{statement_text.rstrip()}\nLIMIT {_ROW_LIMIT}"
-    return statement_text
+    return Checked(statement_text, parsed)
+
+
+_UNGROUPED = re.compile(r'column "([^"]+)" must appear in the GROUP BY', re.IGNORECASE)
+
+
+def describe_failure(failure: Exception, shape: str | None = None) -> str:
+    """Return the repair message for a failed statement.
+
+    The message holds the first line of the error. DuckDB puts its advice on
+    the next lines, and the model never sees them, so a known error gets its
+    fix here. A column beside an aggregate must join the GROUP BY or sit in an
+    aggregate. The right fix depends on `shape`, the result shape that the
+    model chose. A list has one row per group, so any_value would collapse it
+    to one row. Without this advice a model repeats the same statement.
+    """
+    text = str(failure)
+    message = f"{type(failure).__name__}: {(text.splitlines() or [''])[0]}"
+    ungrouped = _UNGROUPED.search(text)
+    if ungrouped:
+        column = ungrouped.group(1)
+        if shape == "list":
+            message += (
+                f" If {column} is the answer, add {column} to GROUP BY: the list has one row "
+                f"per {column}, and any_value({column}) would collapse it to one row. "
+                "Wrap any other ungrouped column in an aggregate such as max()."
+            )
+        else:
+            message += (
+                f" Fix it in one of two ways: wrap {column} in an aggregate such as "
+                f"any_value({column}) or max({column}), or add {column} to GROUP BY. "
+                "A scalar answer is one row, so the aggregate is usually the right fix."
+            )
+        message += (
+            " A query with list(DISTINCT accession_number) or another aggregate "
+            "may select only grouped columns and aggregates."
+        )
+    return message
+
+
+# --- facts: does the statement fit the dataset and the question? ---------------
+
+
+@dataclass(frozen=True)
+class Facts:
+    """What the dataset holds. Each field needs only `in`; the agent copies nothing.
+
+    `offered` lists the cusips that the user message showed to the model. A
+    cusip outside it is a guess, even when the dataset holds it. A value of
+    None skips that check.
+    """
+
+    cusips: Collection[str]
+    funds: Collection[str]
+    quarters: Collection[str]
+    offered: Collection[str] | None = None
+
+
+_FACT_COLUMNS = frozenset({"cusip", "fund_name", "report_quarter"})
+_EQUALITY = frozenset({
+    "COMPARE_EQUAL", "COMPARE_NOTEQUAL", "COMPARE_DISTINCT_FROM", "COMPARE_NOT_DISTINCT_FROM",
+})
+_MEMBERSHIP = frozenset({"COMPARE_IN", "COMPARE_NOT_IN"})
+# A filter is an expression in one of these slots of the parse tree.
+_FILTER_SLOTS = ("where_clause", "having", "qualify", "condition", "when_expr", "filter")
+
+
+def _column_name(node: object) -> str | None:
+    """The lower-case column of a column reference, or None for any other node."""
+    if isinstance(node, dict) and node.get("class") == "COLUMN_REF":
+        names = node.get("column_names") or []
+        if names:
+            return str(names[-1]).lower()
+    return None
+
+
+def _text_literal(node: object) -> str | None:
+    """The text of a string constant, or None for any other node."""
+    if isinstance(node, dict) and node.get("class") == "CONSTANT":
+        value = node.get("value") or {}
+        if not value.get("is_null") and (value.get("type") or {}).get("id") == "VARCHAR":
+            return str(value.get("value"))
+    return None
+
+
+def _literals_of(node: dict):
+    """Yield (column, text) for each text literal that this node compares to a fact column.
+
+    The node is `column = 'x'`, `'x' = column`, or `column IN ('x', 'y')`. A
+    column inside a function, such as left(cusip, 6), is not a direct compare.
+    """
+    kind = node.get("type")
+    if not isinstance(kind, str):  # a type node, such as {"id": "VARCHAR"}
+        return
+    if node.get("class") == "COMPARISON" and kind in _EQUALITY:
+        left, right = node.get("left"), node.get("right")
+        for column, other in ((left, right), (right, left)):
+            name = _column_name(column)
+            text = _text_literal(other)
+            if name in _FACT_COLUMNS and text is not None:
+                yield name, text
+    elif kind in _MEMBERSHIP:
+        children = node.get("children") or []
+        name = _column_name(children[0]) if children else None
+        if name in _FACT_COLUMNS:
+            for child in children[1:]:
+                text = _text_literal(child)
+                if text is not None:
+                    yield name, text
+
+
+def _grouped_columns(node: dict) -> set[str]:
+    """The lower-case columns that a SELECT node groups by.
+
+    `GROUP BY 1` points at the first select item, and `GROUP BY alias` at the
+    item with that alias. Both resolve to the column that the item reads. A
+    table column wins over an alias of the same name, as in DuckDB.
+    """
+    select_list = node.get("select_list") or []
+    by_alias = {
+        str(item.get("alias")).lower(): item
+        for item in select_list
+        if isinstance(item, dict) and item.get("alias")
+    }
+    columns: set[str] = set()
+    for key in node.get("group_expressions") or []:
+        if isinstance(key, dict) and key.get("class") == "CONSTANT":
+            position = (key.get("value") or {}).get("value")
+            if isinstance(position, int) and 1 <= position <= len(select_list):
+                key = select_list[position - 1]
+        name = _column_name(key)
+        if name in by_alias and name not in ALLOWED_COLUMNS:
+            name = _column_name(by_alias[name])
+        if name:
+            columns.add(name)
+    return columns
+
+
+def _check_grouping(node: dict) -> None:
+    """Reject a GROUP BY that splits a fund's rows by filing.
+
+    One accession belongs to one quarter, so a sum per accession covers one
+    filing, not the fund. A cik without fund_name drops the answer column.
+    """
+    columns = _grouped_columns(node)
+    if "accession_number" in columns:
+        raise SQLRejected(
+            "do not group by accession_number: one accession belongs to one quarter, so each "
+            "sum covers one filing. For one value across all rows, use no GROUP BY. "
+            "For one value per fund, group by f.fund_name. "
+            "list(DISTINCT accession_number) cites the filings and needs no GROUP BY"
+        )
+    if "cik" in columns and "fund_name" not in columns:
+        raise SQLRejected(
+            "do not group by cik alone: the answer names a fund. "
+            "Group by f.fund_name, so that each sum covers every filing of the fund"
+        )
+
+
+def _atoms(expression: object):
+    """Split a filter at AND, OR, and NOT. Yield each part that remains."""
+    if not isinstance(expression, dict):
+        return
+    if expression.get("class") == "CONJUNCTION" or expression.get("type") == "OPERATOR_NOT":
+        for child in expression.get("children") or []:
+            yield from _atoms(child)
+    else:
+        yield expression
+
+
+def _filters_issuer_name(part: dict) -> bool:
+    """True when one part of a filter tests name_of_issuer against a text literal.
+
+    The part is a comparison, IN, BETWEEN, or a function such as LIKE. A text
+    literal must be one of its operands, and name_of_issuer must sit in
+    another operand, as in `upper(name_of_issuer) LIKE '%APPLE%'`.
+    """
+    operands = [part.get(key) for key in ("left", "right", "input", "lower", "upper")]
+    operands += part.get("children") or []
+    if not any(_text_literal(operand) is not None for operand in operands):
+        return False
+    return any(
+        _column_name(node) == "name_of_issuer" for operand in operands for node in _walk(operand)
+    )
+
+
+def check_facts(tree: dict, facts: Facts, named_quarters: Collection[str]) -> None:
+    """Raise SQLRejected unless the statement fits the dataset and the question.
+
+    `tree` is the parse tree that `inspect` returned. `named_quarters` are the
+    quarters that the question spells out and that the dataset holds.
+    """
+    seen_quarters: set[str] = set()
+    for node in _walk(tree):
+        if node.get("group_expressions"):
+            _check_grouping(node)
+        for column, text in _literals_of(node):
+            if column == "cusip" and text not in facts.cusips:
+                raise SQLRejected(f"cusip {text!r} is not in the dataset; do not invent a cusip")
+            if column == "cusip" and facts.offered is not None and text not in facts.offered:
+                raise SQLRejected(
+                    f"cusip {text!r} is not in the user message; use a cusip that it lists"
+                )
+            if column == "fund_name" and text not in facts.funds:
+                raise SQLRejected(
+                    f"fund_name {text!r} is not in the dataset; "
+                    "write a fund exactly as the user message spells it"
+                )
+            if column == "report_quarter":
+                if text not in facts.quarters:
+                    raise SQLRejected(
+                        f"report_quarter {text!r} is not in the dataset; "
+                        f"it holds {', '.join(sorted(facts.quarters))}"
+                    )
+                seen_quarters.add(text)
+        for slot in _FILTER_SLOTS:
+            for part in _atoms(node.get(slot)):
+                if _filters_issuer_name(part):
+                    raise SQLRejected(
+                        "do not filter on name_of_issuer; "
+                        "filter an issuer by cusip, using a cusip from the user message"
+                    )
+    missing = sorted(set(named_quarters) - seen_quarters)
+    if missing:
+        raise SQLRejected(
+            f"the question names {', '.join(missing)}, but the SQL has no "
+            f"report_quarter filter on it; add report_quarter = '{missing[0]}'"
+        )

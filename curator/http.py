@@ -124,7 +124,9 @@ class Fetcher:
             _log_retry(url, attempt, last_detail, delay)
             time.sleep(delay)
         reason = f"status {last_status}" if last_status is not None else last_detail
-        raise FetchError(f"GET {url} failed after {attempts_used} attempts ({reason})")
+        raise FetchError(
+            f"GET {url} failed after {attempts_used} attempts ({reason})", status=last_status
+        )
 
 
 def _retry_delay(attempt: int, retry_after: str | None) -> float:

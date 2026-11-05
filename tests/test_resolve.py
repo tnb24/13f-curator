@@ -10,10 +10,12 @@ import pyarrow as pa
 import pytest
 
 from agents.resolve import (
+    MAX_LOOKUP_CHARS,
     Issuer,
     IssuerIndex,
     NameIndex,
     Resolver,
+    named_quarters,
     out_of_scope,
     parse_scope,
     question_terms,
@@ -31,9 +33,12 @@ HAVE_TABLES = (ROOT / "output" / "holdings.parquet").exists()
         ("in 2026Q2", {"2026Q2"}),
         ("in 2026-Q2", {"2026Q2"}),
         ("in Q1 2026", {"2026Q1"}),
+        ("in Q1 of 2026", {"2026Q1"}),
         ("in the first quarter of 2026", {"2026Q1"}),
         ("in the 2nd quarter 2026", {"2026Q2"}),
         ("between 2026 Q1 and 2026 Q2", {"2026Q1", "2026Q2"}),
+        ("between 2026 Q1 and Q3", {"2026Q1", "2026Q3"}),
+        ("between Q1 and Q3 2026", {"2026Q1", "2026Q3"}),
         ("at the end of 2025", {"2025Q1", "2025Q2", "2025Q3", "2025Q4"}),
         ("how many filings", set()),
         ("what about 13F-HR forms", set()),  # 13 is no year
@@ -43,10 +48,57 @@ def test_parse_scope(question: str, quarters: set[str]) -> None:
     assert parse_scope(question) == quarters
 
 
-def test_out_of_scope_needs_every_named_quarter_outside() -> None:
-    assert out_of_scope("in 2026 Q3") is not None
-    assert out_of_scope("between 2026 Q2 and 2026 Q3") is None  # Q2 is answerable
-    assert out_of_scope("no quarter at all") is None
+HELD = ("2026Q1", "2026Q2")
+
+
+@pytest.mark.parametrize(
+    "question, quarters",
+    [
+        ("in 2026 Q2", {"2026Q2"}),
+        ("between 2026 Q1 and the second quarter of 2026", {"2026Q1", "2026Q2"}),
+        ("in 2026", set()),  # a bare year is not one quarter
+        ("in 2026 Q3", {"2026Q3"}),
+        ("how many filings", set()),
+    ],
+)
+def test_named_quarters_skip_a_bare_year(question: str, quarters: set[str]) -> None:
+    assert named_quarters(question) == quarters
+
+
+def test_out_of_scope_rejects_missing_quarters_including_partial_comparisons() -> None:
+    assert out_of_scope("in 2026 Q3", HELD) is not None
+    assert "unavailable 2026Q3" in out_of_scope("between 2026 Q2 and 2026 Q3", HELD)
+    assert "unavailable 2026Q3" in out_of_scope("between 2026 Q2 and Q3", HELD)
+    assert out_of_scope("between 2026 Q1 and 2026 Q2", HELD) is None
+    assert out_of_scope("no quarter at all", HELD) is None
+
+
+def test_a_bare_year_needs_all_four_quarters() -> None:
+    assert "2026Q3, 2026Q4" in out_of_scope("in 2026", HELD)
+    assert out_of_scope("in 2026", ("2026Q1", "2026Q2", "2026Q3", "2026Q4")) is None
+
+
+def test_the_scope_follows_the_quarters_of_the_dataset() -> None:
+    assert out_of_scope("in 2026 Q3", ("2026Q3",)) is None
+    assert out_of_scope("in 2026 Q1", ("2026Q3",)) is not None
+    assert out_of_scope("in 2025 Q4", ("2025Q4",)) is None
+
+
+@pytest.mark.parametrize(
+    "held, text",
+    [
+        (("2026Q1", "2026Q2"), "the dataset holds only 2026Q1 and 2026Q2; "),
+        (("2026Q1",), "the dataset holds only 2026Q1; "),
+        (("2026Q1", "2026Q2", "2026Q3"), "the dataset holds only 2026Q1, 2026Q2 and 2026Q3; "),
+    ],
+)
+def test_the_reason_names_every_quarter_of_the_dataset(held, text) -> None:
+    reason = out_of_scope("in 2027 Q1", held)
+    assert reason == text + "the question asks only about 2027Q1"
+
+
+def test_a_dataset_with_no_filings_answers_nothing() -> None:
+    assert out_of_scope("no quarter at all", ()) == "the dataset holds no filings"
 
 
 def test_question_terms_drop_filler_and_keep_names() -> None:
@@ -136,6 +188,30 @@ def test_a_fund_match_consumes_its_words() -> None:
     found = resolver.resolve("Did Pershing Square report any Microsoft holdings in 2026 Q2?")
     assert found.funds == ["Pershing Square Capital Management L.P."]
     assert [issuer.cusip for issuer in found.issuers] == ["594918104"]
+
+
+def test_a_lookup_resolves_each_legal_name_like_a_question() -> None:
+    resolver = Resolver(["Citadel Advisors LLC"], ISSUERS)
+    found = resolver.lookup(["Microsoft Corporation", "Citadel Advisors", "Zzyzx Industries"])
+    assert [(item.name, item.funds, [i.cusip for i in item.issuers]) for item in found] == [
+        ("Microsoft Corporation", [], ["594918104"]),
+        ("Citadel Advisors", ["Citadel Advisors LLC"], []),
+        ("Zzyzx Industries", [], []),
+    ]
+
+
+def test_a_lookup_is_bounded() -> None:
+    resolver = Resolver(["Citadel Advisors LLC"], ISSUERS)
+    names = ["Apple", "Apple", "Microsoft", "Nvidia", "Pershing", "x" * 500]
+    found = resolver.lookup(names)
+    assert [item.name for item in found] == ["Apple", "Microsoft", "Nvidia"]  # a repeat adds none
+    assert len(resolver.lookup(["x" * 500])[0].name) == MAX_LOOKUP_CHARS
+
+
+def test_the_resolver_knows_the_dataset_membership() -> None:
+    resolver = Resolver(["Citadel Advisors LLC"], ISSUERS)
+    assert "037833100" in resolver.cusips and "999999999" not in resolver.cusips
+    assert "Citadel Advisors LLC" in resolver.fund_set and "Citadel" not in resolver.fund_set
 
 
 def test_a_question_with_no_names_resolves_nothing() -> None:

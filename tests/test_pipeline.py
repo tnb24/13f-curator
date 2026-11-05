@@ -13,6 +13,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
+from curator import pipeline
 from curator.pipeline import run
 from curator.schema import ATTRIBUTED_SCHEMA, FILINGS_SCHEMA, HOLDINGS_SCHEMA
 from tests import world
@@ -133,6 +134,42 @@ def test_a_second_run_reads_every_body_from_the_cache(tmp_path) -> None:
     manifest = json.loads((second / "manifest.json").read_text(encoding="utf-8"))["run"]
     assert manifest["cache_misses"] == 0
     assert manifest["requests"] == manifest["cache_hits"] > 0
+
+
+def test_a_failed_report_cannot_leave_a_stale_or_partial_file(tmp_path, monkeypatch) -> None:
+    output, _ = _run(tmp_path, "rebuild")
+    report = output / "cusip_check.csv"
+    assert report.exists()
+
+    def fail_after_writing(_records, _cache, directory, _scope):
+        (directory / "cusip_check.csv").write_text("partial", encoding="utf-8")
+        raise RuntimeError("report failed")
+
+    monkeypatch.setattr(pipeline, "run_cusip_check", fail_after_writing)
+    result = run(
+        "Test User test@example.com", output, tmp_path / "rebuild-cache",
+        fetcher=world.FakeSource(world.bodies()), roster=world.write_roster(tmp_path), workers=1,
+    )
+    assert result == {"attribution": True, "cusip_check": False}
+    assert not report.exists()
+    assert pq.read_table(output / "holdings.parquet").num_rows == 11
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stages"] == result
+
+
+def test_a_failed_core_rebuild_invalidates_the_previous_manifest(tmp_path, monkeypatch) -> None:
+    output, _ = _run(tmp_path, "rebuild")
+    assert (output / "manifest.json").exists()
+
+    def fail(*_args):
+        raise RuntimeError("resolution failed")
+
+    monkeypatch.setattr(pipeline, "resolve_filers", fail)
+    with pytest.raises(RuntimeError, match="resolution failed"):
+        run("Test User test@example.com", output, tmp_path / "rebuild-cache",
+            fetcher=world.FakeSource(world.bodies()), roster=world.write_roster(tmp_path),
+            workers=1)
+    assert not (output / "manifest.json").exists()
 
 
 def test_parallel_parse_writes_the_same_bytes(tmp_path) -> None:

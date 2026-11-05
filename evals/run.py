@@ -1,8 +1,8 @@
 """Run the eval set through the agent and grade every answer.
 
-    python -m evals.run                    # the development set, live model
-    python -m evals.run --set holdout      # the held-out set
-    python -m evals.run --only apple-largest-q2 --repeat 3
+    python -m evals.run --out dev-run.json
+    python -m evals.run --set holdout --out holdout-run.json
+    python -m evals.run --only apple-largest-q2 --repeat 3 --out sample.json
 
 Two sets exist. questions.json is the development set: its failures shaped the
 prompt. holdout.json was written before any run against it, and no result on
@@ -10,7 +10,8 @@ it changes the prompt. Report the two scores apart.
 
 One Agent answers every question, so the timings measure a question, not a
 process start. The report goes to stdout. The full record, every trace
-included, goes to evals/results/<set>-<model>.json.
+included, goes to evals/results/<set>-<model>.json unless --out is set. Existing
+records are protected unless --force is passed.
 
 Two scores come out of a run:
 
@@ -103,7 +104,11 @@ def summarise(records: list[dict[str, Any]], startup_ms: float, wall: float) -> 
         "citation_recall": round(statistics.mean(r["citation_recall"] for r in records), 4),
         "citation_precision": round(statistics.mean(r["citation_precision"] for r in records), 4),
         "model_calls": sum(r["trace"]["model_calls"] for r in records),
-        "repair_calls": sum(max(r["trace"]["model_calls"] - 1, 0) for r in records),
+        "lookup_calls": sum(bool(r["trace"].get("lookups")) for r in records),
+        "repair_calls": sum(
+            max(r["trace"]["model_calls"] - 1 - bool(r["trace"].get("lookups")), 0)
+            for r in records
+        ),
         "prompt_tokens": sum(r["prompt_tokens"] for r in records),
         "completion_tokens": sum(r["completion_tokens"] for r in records),
         "agent_startup_ms": startup_ms,
@@ -119,18 +124,39 @@ def summarise(records: list[dict[str, Any]], startup_ms: float, wall: float) -> 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="python -m evals.run")
     parser.add_argument("--set", choices=sorted(SETS), default="dev", help="which question set")
-    parser.add_argument("--only", nargs="*", help="question ids to run")
+    parser.add_argument("--only", nargs="+", help="question ids to run")
     parser.add_argument("--repeat", type=int, default=1, help="ask each question this many times")
     parser.add_argument("--out", type=Path, help="where to write the JSON record")
+    parser.add_argument("--force", action="store_true", help="overwrite an existing record")
     args = parser.parse_args()
 
-    result = run(load(args.set, args.only), args.repeat)
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    items = load(args.set)
+    if args.only:
+        missing = set(args.only) - {item["id"] for item in items}
+        if missing:
+            parser.error(f"unknown question IDs: {', '.join(sorted(missing))}")
+        selected = set(args.only)
+        items = [item for item in items if item["id"] in selected]
+    if not items:
+        parser.error("the question set is empty")
+
+    if args.out:
+        out = args.out
+    else:
+        slug = re.sub(r"[^A-Za-z0-9.-]+", "-", llm.model_id()).strip("-")
+        out = RESULTS / f"{args.set}-{slug}.json"
+    if out.exists() and not args.force:
+        parser.error(f"{out} already exists; choose --out or pass --force to overwrite it")
+    if not out.parent.exists():
+        parser.error(f"output directory {out.parent} does not exist")
+
+    result = run(items, args.repeat)
     summary = {"set": args.set, **result["summary"]}
     result["summary"] = summary
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"[^A-Za-z0-9.-]+", "-", summary["model"]).strip("-")
-    out = args.out or RESULTS / f"{args.set}-{slug}.json"
-    out.write_text(json.dumps(result, indent=2, default=str) + "\n", encoding="utf-8")
+    with out.open("w" if args.force else "x", encoding="utf-8") as record:
+        record.write(json.dumps(result, indent=2, default=str) + "\n")
 
     width = max(len(key) for key in summary)
     for key, value in summary.items():

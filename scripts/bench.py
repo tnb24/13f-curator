@@ -129,7 +129,9 @@ def main() -> int:
             raise RuntimeError("benchmark forbids network: populate the raw response store first")
 
         Fetcher.get = offline
-        run("Bench Run bench@example.com", args.pipeline_child)
+        stages = run("Bench Run bench@example.com", args.pipeline_child)
+        if not all(stages.values()):
+            raise RuntimeError("pipeline benchmark did not produce every report")
         return 0
     print(f"python {sys.version.split()[0]} on {sys.platform}")
     if args.pipeline:

@@ -14,17 +14,25 @@ stdout carries one JSON object and nothing else. Logs go to stderr.
 `sources` lists the accession numbers of the filings behind the answer, so a
 researcher can check every answer against EDGAR.
 
-One question runs in five steps:
+One question runs in six steps:
 
     1. reject a question about a quarter outside the dataset (no model call)
     2. find the funds and issuers (by CUSIP) that it names     agents/resolve.py
     3. ask the model for one SELECT statement                  agents/sql.py
     4. validate the statement against an allow list            agents/validate.py
     5. run it on a private, read-only DuckDB                   agents/db.py
+    6. check the result: a row, an answer, and a filing cited
 
-`Agent` owns everything that outlives one question: the database and the
-name indexes. A process that asks many questions, such as the eval runner,
-builds one Agent and reuses it. `main()` builds one for a single question.
+The model may answer step 3 with names to look up instead of SQL, such as
+"Alphabet Inc" for "Google". The agent resolves them with the same index as
+step 2 and asks again. A failure in step 4, 5, or 6 goes back to the model as
+the repair error. The call budget is at most one lookup and two statements, so
+a question costs one call, or at most three.
+
+`Agent` owns everything that outlives one question: the database, the report
+quarters of the dataset (`Agent.quarters`), and the name indexes. A process
+that asks many questions, such as the eval runner, builds one Agent and reuses
+it. `main()` builds one for a single question.
 """
 
 from __future__ import annotations
@@ -37,6 +45,7 @@ import sys
 import time
 import traceback
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -48,6 +57,16 @@ from agents.resolve import Issuer, IssuerIndex, Resolution, Resolver
 VALID_UNITS = frozenset({"USD", "SHARES", "COUNT", "PERCENT", "NAME", "DATE", "NONE"})
 NULL_ANSWER: dict[str, Any] = {"answer": None, "unit": "NONE", "sources": []}
 _PREVIEW_ROWS = 20
+
+# The call budget. A lookup is not a statement, so the worst case is one lookup,
+# one statement, and one repaired statement: three calls. A question that needs
+# no lookup and no repair costs one call.
+MAX_LOOKUPS = 1
+MAX_STATEMENTS = 2
+
+# A DuckDB error that a second statement would most likely repeat. A timeout
+# (db.QueryTimeout) is not a duckdb.Error, so it already passes through.
+_NO_REPAIR = (duckdb.InterruptException, duckdb.OutOfMemoryException)
 
 
 def _log(message: str) -> None:
@@ -127,6 +146,43 @@ def _shape_answer(rows: list[tuple], shape: str, names: list[str]) -> Any:
     return _plain(first[columns[0]])
 
 
+def _read_result(result: db.Result, shape: str) -> tuple[Any, list[str]]:
+    """Return the answer and its sources. Raise SQLRejected when the result is no answer.
+
+    Three results are failures, and each earns a repair call: no row, a NULL
+    answer, and an answer that cites no accession. The agent returns a null
+    answer only after the repair also fails.
+    """
+    if not result.rows:
+        raise validate.SQLRejected(
+            "the query returned no row; a filter probably matches nothing, so recheck "
+            "each cusip, fund_name, quarter, and put_call filter"
+        )
+    answer = _shape_answer(result.rows, shape, result.columns)
+    if answer is None or (isinstance(answer, list) and all(item is None for item in answer)):
+        raise validate.SQLRejected(
+            "the answer column is NULL; an aggregate over no row gives NULL, "
+            "so recheck each filter"
+        )
+    sources = _collect_sources(result.rows, result.columns)
+    if not sources:
+        raise validate.SQLRejected(
+            "the result cites no accession_number; the answer must name the filings it reads"
+        )
+    return answer, sources
+
+
+@dataclass
+class _Attempt:
+    """One statement that passed every check, with its result."""
+
+    statement: str
+    generation: dict[str, Any]
+    result: db.Result
+    answer: Any
+    sources: list[str]
+
+
 @dataclass
 class Trace:
     """How one answer came about. The CLI prints it on --trace; the evals store it."""
@@ -136,6 +192,7 @@ class Trace:
     terms: list[str] = field(default_factory=list)
     funds: list[str] = field(default_factory=list)
     issuers: list[dict[str, Any]] = field(default_factory=list)
+    lookups: list[dict[str, Any]] = field(default_factory=list)
     sql: str | None = None
     rejected: list[str] = field(default_factory=list)
     model_calls: int = 0
@@ -235,6 +292,9 @@ class Agent:
         self._complete = complete
         self.engine = db.Engine(sources)
         try:
+            # The report quarters of the dataset, read once. The scope check
+            # and the system prompt both use them.
+            self.quarters = db.dataset_quarters(sources)
             self.resolver = build_resolver(self.engine)
         except BaseException:
             self.engine.close()
@@ -265,7 +325,7 @@ class Agent:
             clock.total()
 
     def _ask(self, question: str, trace: Trace, clock: _Clock) -> Answer:
-        reason = resolve.out_of_scope(question)
+        reason = resolve.out_of_scope(question, self.quarters)
         if reason:
             trace.out_of_scope = reason
             _log(f"agent: out of scope, so no model call happens: {reason}")
@@ -277,52 +337,84 @@ class Agent:
         trace.issuers = [asdict(issuer) for issuer in resolution.issuers]
         clock.lap("resolve")
 
-        statement, generation, result = self._generate_and_run(question, resolution, trace, clock)
-        trace.sql = statement
-        trace.columns = result.columns
-        trace.row_count = len(result.rows)
-        trace.rows = [[_plain(cell) for cell in row] for row in result.rows[:_PREVIEW_ROWS]]
-
-        if not result.rows:
-            # The prompt asks for an aggregate, so an empty result means the
-            # query shape was wrong, not that the answer is "no".
-            _log("agent: the query returned no row")
-            return Answer(None, "NONE", [], trace)
-
-        answer = _shape_answer(result.rows, generation["result_shape"], result.columns)
-        sources = _collect_sources(result.rows, result.columns)
-        unit = generation["unit"] if answer is not None else "NONE"
-        return Answer(answer, unit, sources, trace)
+        attempt = self._generate_and_run(question, resolution, trace, clock)
+        trace.sql = attempt.statement
+        trace.columns = attempt.result.columns
+        trace.row_count = len(attempt.result.rows)
+        trace.rows = [[_plain(cell) for cell in row] for row in attempt.result.rows[:_PREVIEW_ROWS]]
+        unit = attempt.generation["unit"]
+        return Answer(attempt.answer, unit, attempt.sources, trace)
 
     def _generate_and_run(
         self, question: str, resolution: Resolution, trace: Trace, clock: _Clock
-    ) -> tuple[str, dict[str, Any], db.Result]:
-        """Generate, validate, and run one statement. One repair call is allowed.
+    ) -> _Attempt:
+        """Return the first statement that passes every check. Raise SQLRejected if none does.
 
-        A statement can fail at two points: the validator rejects it, or DuckDB
-        fails to bind it (an unknown function, a column outside GROUP BY). Both
-        failures send the error message back to the model once. A timeout is
-        not repaired: a second statement would most likely time out too.
+        The budget is MAX_STATEMENTS statements and MAX_LOOKUPS lookup. A
+        statement fails at one of four points:
+
+        - the validator rejects the statement;
+        - a literal in the statement is not in the dataset, a cusip is not one
+          that the user message listed, or the statement ignores a quarter
+          that the question names;
+        - DuckDB fails to bind or run the statement (a column beside an
+          aggregate gets its fix in the message);
+        - the result holds no row, a NULL answer, or no accession.
+
+        The failure message goes back to the model as the repair error. A
+        timeout and an out-of-memory error get no repair, because a second
+        statement most likely fails the same way.
         """
+        offered = {issuer.cusip for issuer in resolution.issuers}
+        facts = validate.Facts(
+            cusips=self.resolver.cusips,
+            funds=self.resolver.fund_set,
+            quarters=frozenset(self.quarters),
+            offered=offered,
+        )
+        named = resolve.named_quarters(question) & facts.quarters
         cursor = self.engine.cursor()
         try:
             error: str | None = None
-            for _attempt in range(2):
+            previous: str | None = None
+            looked_up: list[resolve.Lookup] = []
+            statements = 0
+            while statements < MAX_STATEMENTS:
                 trace.model_calls += 1
                 generation = sqlgen.generate(
-                    question, resolution.funds, resolution.issuers, self._complete, error=error
+                    question, resolution.funds, resolution.issuers, self._complete,
+                    error=error, lookups=looked_up, allow_lookup=len(trace.lookups) < MAX_LOOKUPS,
+                    previous=previous, quarters=self.quarters,
                 )
                 clock.lap(f"model_{trace.model_calls}")
+                if "lookup" in generation and len(trace.lookups) < MAX_LOOKUPS:
+                    looked_up = self.resolver.lookup(generation["lookup"])
+                    offered.update(issuer.cusip for found in looked_up for issuer in found.issuers)
+                    trace.lookups = [
+                        {"name": found.name, "funds": found.funds,
+                         "issuers": [issuer.cusip for issuer in found.issuers]}
+                        for found in looked_up
+                    ]
+                    clock.lap("lookup")
+                    continue
+                statements += 1
                 try:
-                    statement = validate.check(generation["sql"], cursor)
+                    if "lookup" in generation:
+                        raise validate.SQLRejected("no second lookup is available; reply with sql")
+                    trace.sql = generation["sql"]
+                    checked = validate.inspect(generation["sql"], cursor)
+                    validate.check_facts(checked.tree, facts, named)
                     clock.lap("validate")
-                    result = self.engine.query(statement)
+                    result = self.engine.query(checked.sql)
                     clock.lap("query")
-                    return statement, generation, result
+                    answer, sources = _read_result(result, generation["result_shape"])
+                    clock.lap("check_result")
+                    return _Attempt(checked.sql, generation, result, answer, sources)
                 except (validate.SQLRejected, duckdb.Error) as failure:
-                    if isinstance(failure, duckdb.InterruptException):
+                    if isinstance(failure, _NO_REPAIR):
                         raise
-                    error = f"{type(failure).__name__}: {str(failure).splitlines()[0]}"
+                    error = validate.describe_failure(failure, generation.get("result_shape"))
+                    previous = generation.get("sql") or previous
                     trace.rejected.append(error)
                     clock.lap(f"failed_{trace.model_calls}")
                     _log(f"agent: statement {trace.model_calls} failed: {error}")
@@ -331,17 +423,25 @@ class Agent:
             cursor.close()
 
 
+def _scope_reason(question: str, sources: dict[str, Path] | None = None) -> str | None:
+    """Check a question against the dataset before any Agent exists.
+
+    The check reads the quarters from the filings file. It opens no database.
+    """
+    return resolve.out_of_scope(question, db.dataset_quarters(sources))
+
+
 def main(question: str) -> dict[str, Any]:
     """Answer one question in a fresh Agent. Never raises.
 
     The scope check runs first, so an out-of-scope question opens no database
     and makes no model call.
     """
-    reason = resolve.out_of_scope(question)
-    if reason:
-        _log(f"agent: out of scope, so no model call happens: {reason}")
-        return dict(NULL_ANSWER)
     try:
+        reason = _scope_reason(question)
+        if reason:
+            _log(f"agent: out of scope, so no model call happens: {reason}")
+            return dict(NULL_ANSWER)
         with Agent() as agent:
             return agent.ask(question).contract()
     except Exception as exc:  # The contract: main() never raises, even if startup fails.
@@ -353,20 +453,33 @@ def _cli() -> int:
     parser = argparse.ArgumentParser(prog="python -m agents.answer")
     parser.add_argument("question")
     parser.add_argument("--trace", action="store_true", help="print the trace to stderr")
+    parser.add_argument("--data-dir", type=Path, help="directory containing the two Parquet tables")
     args = parser.parse_args()
 
-    if args.trace:
-        reason = resolve.out_of_scope(args.question)
+    sources = (
+        {name: args.data_dir / f"{name}.parquet" for name in ("filings", "holdings")}
+        if args.data_dir is not None else None
+    )
+    failed = False
+    try:
+        reason = _scope_reason(args.question, sources)
         if reason:
             result = dict(NULL_ANSWER)
-            _log(json.dumps({"out_of_scope": reason}, indent=2))
+            if args.trace:
+                _log(json.dumps({"out_of_scope": reason}, indent=2))
+            else:
+                _log(f"agent: out of scope, so no model call happens: {reason}")
         else:
-            with Agent() as agent:
+            with Agent(sources=sources) as agent:
                 answer = agent.ask(args.question)
             result = answer.contract()
-            _log(json.dumps(asdict(answer.trace), indent=2, default=str))
-    else:
-        result = main(args.question)
+            failed = answer.trace.error is not None
+            if args.trace:
+                _log(json.dumps(asdict(answer.trace), indent=2, default=str))
+    except Exception as exc:
+        _log(f"agent: returning a null answer after {type(exc).__name__}: {exc}")
+        result = dict(NULL_ANSWER)
+        failed = True
 
     # Check the shape here, so a mistake surfaces before a caller parses stdout.
     missing = {"answer", "unit", "sources"} - set(result)
@@ -374,7 +487,7 @@ def _cli() -> int:
         _log(f"agent: malformed result {result!r}")
         return 1
     print(json.dumps(result))
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

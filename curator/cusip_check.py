@@ -1,6 +1,7 @@
-"""CUSIP check: match every 2026 Q2 CUSIP against the official 13F list.
+"""CUSIP check: match every CUSIP of the last quarter in scope against the official 13F list.
 
-Every unmatched value carries a label and the evidence behind it.
+Every unmatched value carries a label and the evidence behind it. The list for
+the quarter before the last one gives the TIMING label.
 
 The official list is fixed width. It carries no header and no delimiter, and an
 issuer name holds spaces, so every field comes from a character slice.
@@ -28,15 +29,18 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from curator.cache import Cache
+from curator.cache import Cache, FetchError
 from curator.parse import ParsedDataset
+from curator.scope import Scope, parse_quarter, previous_quarter
 
-_Q2_URL = "https://www.sec.gov/files/investment/13flist2026q2-txt.txt"
-# The Q1 file does not follow the Q2 naming pattern. `13flist2026q1-txt.txt`
-# returns 404. Verified live.
-_Q1_URL = "https://www.sec.gov/files/investment/13flist2026q1.txt"
+_LIST_BASE = "https://www.sec.gov/files/investment/"
+# Two quarters have a verified URL. The Q1 file does not follow the Q2 naming
+# pattern: `13flist2026q1-txt.txt` returns 404. Verified live.
+_KNOWN_LISTS = {
+    "2026Q2": _LIST_BASE + "13flist2026q2-txt.txt",
+    "2026Q1": _LIST_BASE + "13flist2026q1.txt",
+}
 
-_QUARTER = "2026Q2"
 _MIN_LINE = 10
 
 # Character slices, zero-based and half-open.
@@ -225,11 +229,48 @@ def normalise_column(values: pa.Array) -> pa.Array:
     return pa.array([normalise(value) for value in values.to_pylist()], pa.string())
 
 
-def _assess(cusip: str, q1: Container[str]) -> str:
+def official_list_urls(quarter: str) -> tuple[str, ...]:
+    """Return the URLs that can hold the official list for one quarter, in the order to try.
+
+    The two verified quarters have one exact URL each. The SEC names any other
+    file in one of two ways, so the function returns both names.
+    """
+    known = _KNOWN_LISTS.get(quarter)
+    if known is not None:
+        return (known,)
+    year, number = parse_quarter(quarter)
+    stem = f"{_LIST_BASE}13flist{year:04d}q{number}"
+    return (f"{stem}.txt", f"{stem}-txt.txt")
+
+
+def fetch_official(cache: Cache, quarter: str) -> bytes:
+    """Return the official list for one quarter. Try each URL until one answers.
+
+    A 404 moves on to the next URL. Every other failure stops at once.
+    When no URL answers, the error names the quarter and every URL tried.
+    """
+    missing: list[str] = []
+    for url in official_list_urls(quarter):
+        try:
+            return cache.get(url)
+        except FetchError as exc:
+            if exc.status != 404:
+                raise
+            missing.append(url)
+    raise FetchError(
+        f"no official 13F list for {quarter}: the SEC returned 404 for {', '.join(missing)}. "
+        "The SEC has not published that list, or it names the file in a new way. "
+        "Use an earlier last quarter in --quarters, or add the file name to "
+        "curator/cusip_check.py.",
+        status=404,
+    )
+
+
+def _assess(cusip: str, prior: Container[str]) -> str:
     """Apply the four assessment rules in order."""
     if check_digit_ok(cusip) is False:
         return "LIKELY_FILER_ERROR"
-    if cusip in q1:
+    if cusip in prior:
         return "TIMING"
     if cusip[:1].isalpha() and check_digit_ok(cusip) is True:
         return "CINS_FOREIGN"
@@ -294,26 +335,32 @@ def _write_bytes(data: bytes, path: Path) -> None:
             temp.unlink()
 
 
-def run_cusip_check(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
-    """Check every 2026 Q2 CUSIP against the official 13F list."""
+def run_cusip_check(dataset: ParsedDataset, cache: Cache, output: Path, scope: Scope) -> None:
+    """Check every CUSIP of the last quarter in scope against the official 13F list.
+
+    The comparison list is the one for the quarter before the last quarter. That
+    quarter need not be in the scope: a one-quarter scope still needs it.
+    """
     output = Path(output)
 
-    q2 = official_table(cache.get(_Q2_URL))
-    q1 = official_table(cache.get(_Q1_URL))
+    last = scope.last_quarter
+    before = previous_quarter(last)
+    current = official_table(fetch_official(cache, last))
+    prior = official_table(fetch_official(cache, before))
     print(
-        f"curator.cusip_check: official list holds {q2.num_rows} Q2 CUSIPs "
-        f"and {q1.num_rows} Q1 CUSIPs",
+        f"curator.cusip_check: official list holds {current.num_rows} CUSIPs for {last} "
+        f"and {prior.num_rows} CUSIPs for {before}",
         file=sys.stderr,
     )
-    for sample in q2.slice(0, 5).to_pylist():
+    for sample in current.slice(0, 5).to_pylist():
         print(f"curator.cusip_check:   sample {sample}", file=sys.stderr)
 
     # One row per (filing, stored CUSIP) pair, sorted. use_threads=False keeps
     # the aggregation ordered, so "first" is the first row in source order.
     holdings = dataset.holdings
-    quarter = holdings.filter(pc.equal(holdings["report_quarter"], _QUARTER))
+    in_last = holdings.filter(pc.equal(holdings["report_quarter"], last))
     pairs = (
-        quarter.group_by(["accession_number", "cusip"], use_threads=False)
+        in_last.group_by(["accession_number", "cusip"], use_threads=False)
         .aggregate([("cik", "first"), ("name_of_issuer", "first"), ([], "count_all")])
         .sort_by([("accession_number", "ascending"), ("cusip", "ascending")])
     )
@@ -323,16 +370,16 @@ def run_cusip_check(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
     # Rule out our own error before any comparison starts.
     bad_length = pc.sum(pc.if_else(pc.not_equal(pc.utf8_length(key), 9), rows, 0)).as_py()
     print(
-        f"curator.cusip_check: {quarter.num_rows} holdings in {_QUARTER}; "
+        f"curator.cusip_check: {in_last.num_rows} holdings in {last}; "
         f"{bad_length or 0} fail the 9-character check",
         file=sys.stderr,
     )
 
-    found = pc.index_in(key, value_set=q2["cusip"])
+    found = pc.index_in(key, value_set=current["cusip"])
     on_list = pc.is_valid(found)
     unmatched = np.flatnonzero(~on_list.to_numpy(zero_copy_only=False))
-    q1_cusips = frozenset(q1["cusip"].to_pylist()) if len(unmatched) else frozenset()
-    labels = [_assess(cusip, q1_cusips) for cusip in key.take(unmatched).to_pylist()]
+    prior_cusips = frozenset(prior["cusip"].to_pylist()) if len(unmatched) else frozenset()
+    labels = [_assess(cusip, prior_cusips) for cusip in key.take(unmatched).to_pylist()]
     assessment = pc.replace_with_mask(
         pa.nulls(len(key), pa.string()), pc.invert(on_list), pa.array(labels, pa.string()))
 
@@ -348,7 +395,7 @@ def run_cusip_check(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
             pairs["cusip"],
             on_list,
             pairs["name_of_issuer_first"],
-            q2["issuer"].take(found),
+            current["issuer"].take(found),
             rows,
             pc.fill_null(assessment, ""),
         ],

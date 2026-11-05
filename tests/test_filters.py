@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from curator.discover import _in_scope
 from curator.records import FilerRecord
+from curator.scope import Scope
+
+SCOPE = Scope()  # the default scope: 2026Q1 and 2026Q2, filed by 2026-08-18
 
 _FILER = FilerRecord(
     fund_name="TEST FUND LP",
@@ -54,9 +57,9 @@ def _frame(entries: list[dict[str, str]]) -> dict[str, list[str]]:
 def test_report_period_filter():
     """reportDate drives the period filter, never filingDate."""
     excluded = _frame([_entry(report_date="2025-12-31")])
-    assert _in_scope(excluded, _FILER) == []
+    assert _in_scope(excluded, _FILER, SCOPE) == []
     included = _frame([_entry(report_date="2026-03-31")])
-    refs = _in_scope(included, _FILER)
+    refs = _in_scope(included, _FILER, SCOPE)
     assert [ref.accession for ref in refs] == ["0001234567-26-000001"]
     assert [ref.report_date for ref in refs] == ["2026-03-31"]
 
@@ -64,9 +67,9 @@ def test_report_period_filter():
 def test_filing_date_cutoff():
     """The cutoff day 2026-08-18 is inclusive; the next day is out."""
     excluded = _frame([_entry(filing_date="2026-08-19")])
-    assert _in_scope(excluded, _FILER) == []
+    assert _in_scope(excluded, _FILER, SCOPE) == []
     included = _frame([_entry(filing_date="2026-08-18")])
-    refs = _in_scope(included, _FILER)
+    refs = _in_scope(included, _FILER, SCOPE)
     assert [ref.filing_date for ref in refs] == ["2026-08-18"]
 
 
@@ -78,7 +81,7 @@ def test_form_filter():
             _entry(accession="0001234567-26-000002", form="13F-NT"),
         ]
     )
-    refs = _in_scope(frame, _FILER)
+    refs = _in_scope(frame, _FILER, SCOPE)
     assert len(refs) == 1
     assert refs[0].form == "13F-NT"
     assert refs[0].accession == "0001234567-26-000002"
@@ -86,7 +89,7 @@ def test_form_filter():
 
 def test_amendment_forms():
     """13F-HR/A survives, and its form keeps the /A suffix parse reads."""
-    refs = _in_scope(_frame([_entry(form="13F-HR/A")]), _FILER)
+    refs = _in_scope(_frame([_entry(form="13F-HR/A")]), _FILER, SCOPE)
     assert len(refs) == 1
     ref = refs[0]
     assert ref.form == "13F-HR/A"

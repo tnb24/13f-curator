@@ -21,7 +21,14 @@ _HTTP_SUBDIR = "http"
 
 
 class FetchError(RuntimeError):
-    """A GET did not return 200 after every retry."""
+    """A GET did not return 200 after every retry.
+
+    `status` holds the HTTP status of the last attempt, or None when no response came.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class Source(Protocol):
@@ -142,8 +149,12 @@ class Manifest:
     def bytes_downloaded(self) -> int:
         return sum(entry["bytes"] for entry in self._entries if not entry["hit"])
 
-    def write(self, path: Path) -> None:
-        """Sort the entries by URL and write the manifest file."""
+    def write(self, path: Path, scope: dict | None = None, stages: dict | None = None) -> None:
+        """Sort the entries by URL and write the manifest file.
+
+        `scope` is the dataset scope as a plain dict. The manifest records it
+        between the run block and the entries.
+        """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         run = {
@@ -155,6 +166,10 @@ class Manifest:
             "bytes_downloaded": self.bytes_downloaded,
         }
         entries = sorted(self._entries, key=lambda entry: entry["url"])
-        document = {"run": {field: run[field] for field in _RUN_FIELDS},
-                    "entries": [{field: e[field] for field in _ENTRY_FIELDS} for e in entries]}
-        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        document: dict = {"run": {field: run[field] for field in _RUN_FIELDS}}
+        if scope is not None:
+            document["scope"] = scope
+        if stages is not None:
+            document["stages"] = stages
+        document["entries"] = [{field: e[field] for field in _ENTRY_FIELDS} for e in entries]
+        _atomic_write_bytes(path, (json.dumps(document, indent=2) + "\n").encode("utf-8"))

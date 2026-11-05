@@ -19,14 +19,13 @@ every name at once, in a few milliseconds.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Iterable, KeysView, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 from rapidfuzz import fuzz, process
-
-IN_SCOPE = {"2026Q1", "2026Q2"}
 
 # --- scope ---------------------------------------------------------------------
 
@@ -39,8 +38,9 @@ _QUARTER_INDEX = {
 _YEAR = r"(20\d{2})"
 # "2026 Q1", "2026Q1", "2026-Q1"
 _YEAR_THEN_QUARTER = re.compile(rf"(?<!\d){_YEAR}\s*-?\s*q([1-4])(?!\d)", re.IGNORECASE)
-# "Q1 2026"
-_QUARTER_THEN_YEAR = re.compile(rf"\bq([1-4])\s*{_YEAR}(?!\d)", re.IGNORECASE)
+# "Q1 2026", "Q1 of 2026"
+_QUARTER_THEN_YEAR = re.compile(rf"\bq([1-4])\s*(?:of\s+)?{_YEAR}(?!\d)", re.IGNORECASE)
+_SHORT_QUARTER = re.compile(r"\bq([1-4])\b", re.IGNORECASE)
 # "first quarter of 2026", "2nd quarter 2026"
 _NAMED_QUARTER = re.compile(
     rf"\b(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter\s+(?:of\s+)?{_YEAR}(?!\d)",
@@ -50,8 +50,8 @@ _NAMED_QUARTER = re.compile(
 _BARE_YEAR = re.compile(rf"(?<!\d){_YEAR}(?!\d)")
 
 
-def parse_scope(question: str) -> set[str]:
-    """Return every quarter that the question names, as YYYYQN."""
+def _explicit_quarters(question: str) -> tuple[set[str], list[tuple[int, int]]]:
+    """Return the quarters that the question spells out, and the text spans they use."""
     quarters: set[str] = set()
     consumed: list[tuple[int, int]] = []
 
@@ -63,6 +63,30 @@ def parse_scope(question: str) -> set[str]:
     collect(_YEAR_THEN_QUARTER, lambda m: {f"{m.group(1)}Q{m.group(2)}"})
     collect(_QUARTER_THEN_YEAR, lambda m: {f"{m.group(2)}Q{m.group(1)}"})
     collect(_NAMED_QUARTER, lambda m: {f"{m.group(2)}Q{_QUARTER_INDEX[m.group(1).lower()]}"})
+    # In "2026 Q1 and Q3", attach the shorthand to the only named year.
+    # With several years the association is ambiguous, so do not guess.
+    years = {match.group(1) for match in _BARE_YEAR.finditer(question)}
+    if quarters and len(years) == 1:
+        year = next(iter(years))
+        for match in _SHORT_QUARTER.finditer(question):
+            if not any(start <= match.start() < end for start, end in consumed):
+                quarters.add(f"{year}Q{match.group(1)}")
+                consumed.append(match.span())
+    return quarters, consumed
+
+
+def named_quarters(question: str) -> set[str]:
+    """Return the quarters that the question spells out, as YYYYQN.
+
+    A bare year is not here: "in 2026" asks about the whole year, so it does
+    not require a filter on one quarter.
+    """
+    return _explicit_quarters(question)[0]
+
+
+def parse_scope(question: str) -> set[str]:
+    """Return every quarter that the question names, as YYYYQN."""
+    quarters, consumed = _explicit_quarters(question)
 
     for match in _BARE_YEAR.finditer(question):
         if any(start <= match.start() < end for start, end in consumed):
@@ -71,13 +95,36 @@ def parse_scope(question: str) -> set[str]:
     return quarters
 
 
-def out_of_scope(question: str) -> str | None:
-    """Return a reason when the question asks only for data the dataset lacks."""
+def join_list(items: Sequence[str], conjunction: str) -> str:
+    """Join items as prose: "A", "A and B", or "A, B and C"."""
+    if len(items) < 2:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} {conjunction} {items[-1]}"
+
+
+def out_of_scope(question: str, quarters: Collection[str]) -> str | None:
+    """Return a reason when a recognized quarter in the question is unavailable.
+
+    `quarters` holds the report quarters of the dataset, each as YYYYQN. A bare
+    year asks about all four quarters; partial coverage must not look like a
+    complete answer to a comparison or a full-year question.
+    """
+    held = sorted(set(quarters))
+    if not held:
+        return "the dataset holds no filings"
     named = parse_scope(question)
-    if not named or named & IN_SCOPE:
+    if not named:
         return None
+    missing = named - set(held)
+    if not missing:
+        return None
+    if named & set(held):
+        return (
+            f"the dataset holds only {join_list(held, 'and')}; "
+            f"the question also asks about unavailable {', '.join(sorted(missing))}"
+        )
     return (
-        f"the dataset holds only {' and '.join(sorted(IN_SCOPE))}; "
+        f"the dataset holds only {join_list(held, 'and')}; "
         f"the question asks only about {', '.join(sorted(named))}"
     )
 
@@ -295,6 +342,11 @@ class IssuerIndex:
         self._names = NameIndex(names)
         self._issuers = issuers
 
+    @property
+    def cusips(self) -> KeysView[str]:
+        """Every CUSIP in the dataset. A membership test costs O(1)."""
+        return self._issuers.keys()
+
     def match(self, terms: list[str], limit: int) -> list[Issuer]:
         best: dict[str, tuple[float, float]] = {}
         # A CUSIP may have arbitrarily many spellings. Truncating names before
@@ -321,6 +373,21 @@ class Resolution:
     issuers: list[Issuer]
 
 
+@dataclass(frozen=True)
+class Lookup:
+    """What the resolver found for one name that the model asked for."""
+
+    name: str
+    funds: list[str]
+    issuers: list[Issuer]
+
+
+# The model may ask for at most this many names in one lookup. A name is cut at
+# this many characters. Both limits keep the next prompt small.
+MAX_LOOKUP_NAMES = 3
+MAX_LOOKUP_CHARS = 100
+
+
 class Resolver:
     """Funds and issuers for one dataset. Built once, then read per question."""
 
@@ -328,6 +395,12 @@ class Resolver:
         self._fund_names = fund_names
         self._funds = NameIndex(fund_names)
         self._issuers = issuer_index
+        self.fund_set = frozenset(fund_names)
+
+    @property
+    def cusips(self) -> KeysView[str]:
+        """Every CUSIP in the dataset."""
+        return self._issuers.cusips
 
     def resolve(self, question: str, fund_limit: int = 3, issuer_limit: int = 6) -> Resolution:
         """Match the funds first. Words a matched fund used do not also name an issuer.
@@ -347,3 +420,16 @@ class Resolver:
             issuers=issuers,
         )
 
+    def lookup(self, names: Iterable[str]) -> list[Lookup]:
+        """Resolve each name that the model asked for, with the same index.
+
+        The model writes the legal name of a company or fund, such as
+        "Alphabet Inc" for "Google". Each name goes through `resolve` as if it
+        were a question. A name with no content word finds nothing.
+        """
+        found = []
+        for name in list(dict.fromkeys(names))[:MAX_LOOKUP_NAMES]:
+            text = name.strip()[:MAX_LOOKUP_CHARS]
+            resolution = self.resolve(text, fund_limit=2, issuer_limit=5)
+            found.append(Lookup(text, resolution.funds, resolution.issuers))
+        return found

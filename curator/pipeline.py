@@ -3,9 +3,13 @@
 `main.py` at the repository root is the command line entry point:
 
     python main.py --user-agent "Jane Doe jane@example.com"
+    python main.py --user-agent "..." --quarters 2026Q1,2026Q2,2026Q3 --cutoff 2026-11-16
 
-The run works from a clean checkout with nothing in output/. A second run reads
-every response from .cache/ and writes byte-identical output.
+`--quarters` and `--cutoff` set the scope. The defaults build the shipped
+dataset. A quarter that ends after the cutoff is an error.
+
+The run works from a clean checkout with nothing in output/. A second run can
+reuse cached responses; the manifest includes run-specific timings and cache stats.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import argparse
 import contextlib
 import csv
 import json
+import multiprocessing
 import os
 import re
 import sys
@@ -25,12 +30,13 @@ from pathlib import Path
 
 from curator.attribution import run_attribution
 from curator.cache import Cache, Manifest, Source
-from curator.cik import resolve_filers, write_filers_csv
+from curator.cik import RosterError, resolve_filers, write_filers_csv
 from curator.cusip_check import run_cusip_check
 from curator.discover import discover
 from curator.download import download
 from curator.http import Fetcher, RateLimiter
 from curator.parse import QualityReport, parse_all, warm_up
+from curator.scope import DEFAULT_CUTOFF, DEFAULT_QUARTERS, Scope, ScopeError
 from curator.write import write_parquet
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,22 +52,52 @@ UA_PATTERN = re.compile(r"^\S.*\s+[^@\s]+@[^@\s]+\.[a-z]{2,}\s*$", re.I)
 
 
 def load_filers(path: Path = FILERS) -> list[dict[str, str]]:
-    """The managers to collect: a `fund_name` column and an optional `cik` column."""
-    with path.open(newline="") as fh:
-        return list(csv.DictReader(fh))
+    """Read and validate a roster before fetching data or changing outputs."""
+    if not path.is_file():
+        raise RosterError(f"{path}: roster file does not exist")
+    with path.open(newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        fields = reader.fieldnames or []
+        if "fund_name" not in fields or len(fields) != len(set(fields)):
+            raise RosterError(f"{path}: CSV needs a unique fund_name column")
+        rows = []
+        seen: set[str] = set()
+        for line, row in enumerate(reader, start=2):
+            if None in row:
+                raise RosterError(f"{path}: row {line} has more fields than the header")
+            name = (row.get("fund_name") or "").strip()
+            if not name:
+                raise RosterError(f"{path}: row {line} has an empty fund_name")
+            key = name.casefold()
+            if key in seen:
+                raise RosterError(f"{path}: row {line} repeats fund_name {name!r}")
+            seen.add(key)
+            row["fund_name"] = name
+            rows.append(row)
+    if not rows:
+        raise RosterError(f"{path}: CSV contains no managers")
+    return rows
 
 
-def _run_extra(function, name: str, records, cache, output) -> None:
+def _run_extra(function, name: str, filename: str, records, cache, output, scope) -> bool:
     """Run one extra stage. A failure there never stops the core pipeline.
 
     The two Parquet tables are already on disk by this point, so a traceback
     here costs the extra output only.
     """
+    target = output / filename
+    # A failed rerun must not leave a report from an older dataset in place.
+    target.unlink(missing_ok=True)
     try:
-        function(records, cache, output)
+        function(records, cache, output, scope)
+        if not target.is_file():
+            raise RuntimeError(f"{name} did not produce {filename}")
+        return True
     except Exception:  # An extra stage must never cost the core tables.
+        target.unlink(missing_ok=True)
         print(f"main: {name} failed; the core output stands", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
+        return False
 
 
 @contextlib.contextmanager
@@ -79,7 +115,8 @@ def run(
     fetcher: Source | None = None,
     roster: Path = FILERS,
     workers: int | None = None,
-) -> None:
+    scope: Scope | None = None,
+) -> dict[str, bool]:
     """Build the dataset, one step at a time, over the shared cache.
 
         1. resolve each manager name to its SEC filer     curator/cik.py
@@ -94,13 +131,27 @@ def run(
     tests pass a fetcher that serves fixture bodies, so the whole pipeline
     runs with no network. `workers=1` parses in this process. stdout stays empty.
     Progress goes to stderr.
+
+    When calling this from a script with multiple workers, use the standard
+    ``if __name__ == "__main__"`` guard: workers start with multiprocessing spawn.
+
+    Return the success status of each optional report. A failed report is absent,
+    while the core tables and the manifest remain available.
+
+    `scope` names the quarters and the filing cutoff. None means the default
+    scope. The run passes the scope to every stage and records it in the manifest.
     """
+    scope = Scope() if scope is None else scope
+    filers = load_filers(roster)
     owned = fetcher is None
     source: Source = Fetcher(user_agent, RateLimiter(5.0)) if fetcher is None else fetcher
     manifest = Manifest()
     cache = Cache(cache_dir, source, manifest)
     try:
-        _build(cache, manifest, output, roster, parse_workers() if workers is None else workers)
+        return _build(
+            cache, manifest, output, filers,
+            parse_workers() if workers is None else workers, scope,
+        )
     finally:
         if owned and isinstance(source, Fetcher):
             source.close()
@@ -111,18 +162,28 @@ def parse_workers() -> int:
     return min(os.cpu_count() or 1, _MAX_PARSE_WORKERS)
 
 
-def _build(cache: Cache, manifest: Manifest, output: Path, roster: Path, workers: int) -> None:
+def _build(
+    cache: Cache, manifest: Manifest, output: Path, roster: list[dict[str, str]],
+    workers: int, scope: Scope,
+) -> dict[str, bool]:
     filings_dir = output / "filings"
     filings_dir.mkdir(parents=True, exist_ok=True)
+    # An interrupted or failed rebuild must not retain an old success manifest.
+    (output / "manifest.json").unlink(missing_ok=True)
 
     # The parse workers start now. Each one imports lxml and pyarrow while this
     # process resolves filers, so no parse task waits for an interpreter start.
-    pool = ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
+    # Arrow and other libraries may have started threads before a rebuild. Forking
+    # that process can deadlock; spawn gives every worker a clean interpreter.
+    pool = (
+        ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"))
+        if workers > 1 else None
+    )
     try:
         if pool is not None:
             for _ in range(workers):
                 pool.submit(warm_up)
-        _stages(cache, manifest, output, roster, filings_dir, pool)
+        return _stages(cache, manifest, output, roster, filings_dir, pool, scope)
     finally:
         if pool is not None:
             pool.shutdown()
@@ -132,12 +193,13 @@ def _stages(
     cache: Cache,
     manifest: Manifest,
     output: Path,
-    roster: Path,
+    roster: list[dict[str, str]],
     filings_dir: Path,
     pool: Executor | None,
-) -> None:
+    scope: Scope,
+) -> dict[str, bool]:
     with _stage("resolve"):
-        filers = resolve_filers(load_filers(roster), cache)
+        filers = resolve_filers(roster, cache, scope)
     corrected = sum(1 for filer in filers if filer.cik_source == "corrected")
     print(
         f"main: resolved {len(filers)} filers; {corrected} input CIKs named another filer",
@@ -146,7 +208,7 @@ def _stages(
     write_filers_csv(filers, output / "filers.csv")
 
     with _stage("discover"):
-        refs = discover(filers, cache)
+        refs = discover(filers, cache, scope)
     print(f"main: discovered {len(refs)} filings in scope", file=sys.stderr)
     with _stage("download"):
         docs = download(refs, cache, filings_dir)
@@ -171,14 +233,21 @@ def _stages(
     )
 
     with _stage("attribution"):
-        _run_extra(run_attribution, "attribution", records, cache, output)
+        attribution = _run_extra(
+            run_attribution, "attribution", "attributed_holdings.parquet",
+            records, cache, output, scope,
+        )
     with _stage("cusip_check"):
-        _run_extra(run_cusip_check, "cusip_check", records, cache, output)
+        cusip_check = _run_extra(
+            run_cusip_check, "cusip_check", "cusip_check.csv", records, cache, output, scope
+        )
 
     manifest_path = output / "manifest.json"
-    manifest.write(manifest_path)
+    stages = {"attribution": attribution, "cusip_check": cusip_check}
+    manifest.write(manifest_path, scope.as_dict(), stages)
     run_block = json.loads(manifest_path.read_text(encoding="utf-8"))["run"]
     print(f"main: manifest run: {json.dumps(run_block)}", file=sys.stderr)
+    return stages
 
 
 def main() -> int:
@@ -191,6 +260,12 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=OUTPUT)
     ap.add_argument("--cache-dir", type=Path, default=CACHE_DIR,
                     help="where raw EDGAR responses are kept (default: .cache/)")
+    ap.add_argument("--quarters", default=",".join(DEFAULT_QUARTERS),
+                    help="report quarters to collect, comma separated, as YYYYQN "
+                         "(default: %(default)s)")
+    ap.add_argument("--cutoff", default=DEFAULT_CUTOFF,
+                    help="last filing date to accept, YYYY-MM-DD, inclusive "
+                         "(default: %(default)s)")
     args = ap.parse_args()
 
     if not UA_PATTERN.match(args.user_agent):
@@ -199,8 +274,18 @@ def main() -> int:
             "SEC requires a contact address and rejects requests without one.\n"
             '  python main.py --user-agent "Jane Doe jane@example.com"'
         )
+    try:
+        scope = Scope.parse(args.quarters, args.cutoff)
+    except ScopeError as exc:
+        ap.error(str(exc))
 
     args.output.mkdir(parents=True, exist_ok=True)
-    run(args.user_agent, args.output, args.cache_dir, roster=args.filers)
+    try:
+        stages = run(args.user_agent, args.output, args.cache_dir, roster=args.filers, scope=scope)
+    except RosterError as exc:
+        ap.error(str(exc))
+    if not all(stages.values()):
+        print("main: one or more reports failed; see manifest.json and stderr", file=sys.stderr)
+        return 1
     return 0
 

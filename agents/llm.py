@@ -6,7 +6,7 @@ Configuration comes from the environment. Copy `.env.example` to `.env`:
     LLM_API_KEY       bearer token
     LLM_MODEL         model id; leave blank to use the first model the endpoint lists
     LLM_MODE          "live" or "mock"
-    LLM_TOKEN_BUDGET  hard cap on tokens for one process
+    LLM_TOKEN_BUDGET  stop threshold for provider-reported tokens in one process
 
 Any OpenAI-compatible server works: Ollama, LM Studio, vLLM, llama.cpp, OpenRouter.
 LLM_MODE=mock returns fixed replies and contacts no endpoint.
@@ -53,7 +53,7 @@ class TokenBudgetExceeded(LLMError):
 
 
 class _Budget:
-    """Cumulative token usage for a run, with a hard cap."""
+    """Cumulative provider-reported token usage for a run."""
 
     def __init__(self, limit: int) -> None:
         self.limit = limit
@@ -65,6 +65,14 @@ class _Budget:
     @property
     def total(self) -> int:
         return self.prompt_tokens + self.completion_tokens
+
+    def ensure_available(self) -> None:
+        """Stop before another request once reported usage reaches the limit."""
+        with self._lock:
+            if self.total >= self.limit:
+                raise TokenBudgetExceeded(
+                    f"token budget exhausted: {self.total} >= {self.limit} after {self.calls} calls"
+                )
 
     def charge(self, usage: dict[str, Any] | None) -> None:
         with self._lock:
@@ -190,6 +198,7 @@ def complete(
     if os.environ.get("LLM_MODE", "live").lower() == "mock":
         return _mock(msgs, schema)
 
+    BUDGET.ensure_available()
     api = endpoint()
     body: dict[str, Any] = {
         "model": api.model,

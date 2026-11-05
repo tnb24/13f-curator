@@ -1,0 +1,1825 @@
+{
+  "summary": {
+    "set": "dev",
+    "model": "google/gemma-4-31b-it",
+    "questions": 27,
+    "answers": 27,
+    "passed": 26,
+    "accuracy": 0.963,
+    "citation_recall": 1.0,
+    "citation_precision": 1.0,
+    "model_calls": 31,
+    "lookup_calls": 4,
+    "repair_calls": 2,
+    "prompt_tokens": 56530,
+    "completion_tokens": 3084,
+    "agent_startup_ms": 301.8,
+    "latency_ms_p50": 2312.7,
+    "latency_ms_p95": 6924.3,
+    "local_ms_p50": 21.62,
+    "local_ms_max": 35.81,
+    "wall_seconds": 77.8
+  },
+  "records": [
+    {
+      "id": "apple-largest-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "AQR Capital Management LLC",
+      "answer": "AQR Capital Management LLC",
+      "unit": "NAME",
+      "sources": [
+        "0001167557-26-000226"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1796,
+      "completion_tokens": 121,
+      "trace": {
+        "question": "Which manager held the largest Apple position in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "apple"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "037833100",
+            "name": "APPLE INC",
+            "title_of_class": "COM",
+            "rows": 85
+          },
+          {
+            "cusip": "03784Y200",
+            "name": "APPLE HOSPITALITY REIT INC",
+            "title_of_class": "COM NEW",
+            "rows": 26
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT f.fund_name AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('037833100') AND h.report_quarter = '2026Q2' AND h.put_call IS NULL GROUP BY f.fund_name ORDER BY sum(h.value) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "AQR Capital Management LLC",
+            [
+              "0001167557-26-000226"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.14,
+          "model_1": 3724.67,
+          "validate": 5.1,
+          "query": 22.86,
+          "check_result": 0.16,
+          "total": 3755.1
+        }
+      }
+    },
+    {
+      "id": "nvidia-added-most",
+      "attempt": 0,
+      "passed": true,
+      "expected": "AQR Capital Management LLC",
+      "answer": "AQR Capital Management LLC",
+      "unit": "SHARES",
+      "sources": [
+        "0001167557-26-000115",
+        "0001167557-26-000226"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1784,
+      "completion_tokens": 182,
+      "trace": {
+        "question": "Which manager added the most Nvidia shares between 2026 Q1 and 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "nvidia"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "67066G104",
+            "name": "NVIDIA CORPORATION",
+            "title_of_class": "COM",
+            "rows": 95
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT f.fund_name AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('67066G104') AND h.put_call IS NULL AND h.report_quarter IN ('2026Q1', '2026Q2') GROUP BY f.fund_name ORDER BY sum(CASE WHEN h.report_quarter = '2026Q2' THEN h.ssh_prnamt ELSE 0 END) - sum(CASE WHEN h.report_quarter = '2026Q1' THEN h.ssh_prnamt ELSE 0 END) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "AQR Capital Management LLC",
+            [
+              "0001167557-26-000115",
+              "0001167557-26-000226"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.54,
+          "model_1": 2944.54,
+          "validate": 5.53,
+          "query": 25.2,
+          "check_result": 0.15,
+          "total": 2978.11
+        }
+      }
+    },
+    {
+      "id": "renaissance-issuers-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": 2932,
+      "answer": 2932,
+      "unit": "COUNT",
+      "sources": [
+        "0001037389-26-000059"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1767,
+      "completion_tokens": 93,
+      "trace": {
+        "question": "How many distinct issuers did Renaissance Technologies LLC report in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "renaissance",
+          "technologies"
+        ],
+        "funds": [
+          "Renaissance Technologies LLC"
+        ],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT count(DISTINCT left(h.cusip, 6)) AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f JOIN holdings h USING (accession_number) WHERE f.fund_name = 'Renaissance Technologies LLC' AND f.report_quarter = '2026Q2'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            2932,
+            [
+              "0001037389-26-000059"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.76,
+          "model_1": 2230.7,
+          "validate": 5.7,
+          "query": 13.15,
+          "check_result": 0.07,
+          "total": 2250.45
+        }
+      }
+    },
+    {
+      "id": "citadel-total-q1",
+      "attempt": 0,
+      "passed": true,
+      "expected": 618473172395,
+      "answer": 618473172395,
+      "unit": "USD",
+      "sources": [
+        "0001104659-26-062477"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1770,
+      "completion_tokens": 85,
+      "trace": {
+        "question": "What was the total reported value of Citadel Advisors LLC's holdings in 2026 Q1?",
+        "out_of_scope": null,
+        "terms": [
+          "citadel"
+        ],
+        "funds": [
+          "Citadel Advisors LLC"
+        ],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT sum(h.value) AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f JOIN holdings h USING (accession_number) WHERE f.fund_name = 'Citadel Advisors LLC' AND f.report_quarter = '2026Q1'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            618473172395,
+            [
+              "0001104659-26-062477"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.32,
+          "model_1": 2633.07,
+          "validate": 5.97,
+          "query": 14.09,
+          "check_result": 0.1,
+          "total": 2653.62
+        }
+      }
+    },
+    {
+      "id": "nt-filers-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": [
+        "Pershing Square Capital Management L.P."
+      ],
+      "answer": [
+        "Pershing Square Capital Management, L.P."
+      ],
+      "unit": "NAME",
+      "sources": [
+        "0001172661-26-003777"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1779,
+      "completion_tokens": 85,
+      "trace": {
+        "question": "Which managers in the roster filed a 13F-NT instead of a 13F-HR for 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [],
+        "funds": [],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT f.filing_manager AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f WHERE f.report_quarter = '2026Q2' AND f.form_type LIKE '13F-NT%' GROUP BY f.filing_manager\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "Pershing Square Capital Management, L.P.",
+            [
+              "0001172661-26-003777"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.11,
+          "model_1": 1504.65,
+          "validate": 4.17,
+          "query": 6.2,
+          "check_result": 0.05,
+          "total": 1515.27
+        }
+      }
+    },
+    {
+      "id": "pershing-microsoft-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "no",
+      "answer": "no",
+      "unit": "NONE",
+      "sources": [
+        "0001172661-26-003777"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1785,
+      "completion_tokens": 137,
+      "trace": {
+        "question": "Did Pershing Square Capital Management report any Microsoft holdings directly in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "pershing",
+          "square",
+          "capital",
+          "management",
+          "microsoft"
+        ],
+        "funds": [
+          "Pershing Square Capital Management L.P."
+        ],
+        "issuers": [
+          {
+            "cusip": "594918104",
+            "name": "MICROSOFT CORP",
+            "title_of_class": "COM",
+            "rows": 94
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT CASE WHEN count(h.cusip) > 0 THEN 'yes' ELSE 'no' END AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f LEFT JOIN holdings h ON h.accession_number = f.accession_number AND h.cusip IN ('594918104') AND h.put_call IS NULL WHERE f.fund_name = 'Pershing Square Capital Management L.P.' AND f.report_quarter = '2026Q2'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "no",
+            [
+              "0001172661-26-003777"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.39,
+          "model_1": 2482.04,
+          "validate": 4.9,
+          "query": 10.22,
+          "check_result": 0.11,
+          "total": 2499.75
+        }
+      }
+    },
+    {
+      "id": "most-calls-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "Citadel Advisors LLC",
+      "answer": "Citadel Advisors LLC",
+      "unit": "COUNT",
+      "sources": [
+        "0001104659-26-097200"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1765,
+      "completion_tokens": 105,
+      "trace": {
+        "question": "Which manager reported the most call options in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [],
+        "funds": [],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT f.fund_name AS answer, list(DISTINCT f.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE f.report_quarter = '2026Q2' AND upper(h.put_call) = 'CALL' GROUP BY f.fund_name ORDER BY count(*) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "Citadel Advisors LLC",
+            [
+              "0001104659-26-097200"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.08,
+          "model_1": 2126.03,
+          "validate": 5.56,
+          "query": 19.31,
+          "check_result": 0.15,
+          "total": 2151.25
+        }
+      }
+    },
+    {
+      "id": "thirdpoint-largest-q1",
+      "attempt": 0,
+      "passed": true,
+      "expected": "AMAZON COM INC",
+      "answer": "AMAZON COM INC",
+      "unit": "NAME",
+      "sources": [
+        "0001040273-26-000002"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 3773,
+      "completion_tokens": 215,
+      "trace": {
+        "question": "What was Third Point LLC's largest position by value in 2026 Q1, and what was it?",
+        "out_of_scope": null,
+        "terms": [
+          "third",
+          "point"
+        ],
+        "funds": [
+          "Third Point LLC"
+        ],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT any_value(h.name_of_issuer) AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE f.fund_name = 'Third Point LLC' AND f.report_quarter = '2026Q1' GROUP BY h.cusip, h.put_call ORDER BY sum(h.value) DESC LIMIT 1",
+        "rejected": [
+          "BinderException: Binder Error: column \"name_of_issuer\" must appear in the GROUP BY clause or must be part of an aggregate function. Fix it in one of two ways: wrap name_of_issuer in an aggregate such as any_value(name_of_issuer) or max(name_of_issuer), or add name_of_issuer to GROUP BY. A scalar answer is one row, so the aggregate is usually the right fix. A query with list(DISTINCT accession_number) or another aggregate may select only grouped columns and aggregates."
+        ],
+        "model_calls": 2,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "AMAZON COM INC",
+            [
+              "0001040273-26-000002"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.56,
+          "model_1": 5039.79,
+          "failed_1": 6.2,
+          "model_2": 1848.66,
+          "validate": 5.79,
+          "query": 23.09,
+          "check_result": 0.09,
+          "total": 6924.26
+        }
+      }
+    },
+    {
+      "id": "tesla-both-quarters",
+      "attempt": 0,
+      "passed": true,
+      "expected": {
+        "AQR Capital Management LLC": "grew",
+        "Balyasny Asset Management L.P.": "grew",
+        "Citadel Advisors LLC": "shrank",
+        "D. E. Shaw & Co. Inc.": "shrank",
+        "Man Group plc": "shrank",
+        "Millennium Management LLC": "shrank",
+        "Renaissance Technologies LLC": "grew",
+        "Tudor Investment Corp": "grew",
+        "Viking Global Investors LP": "shrank"
+      },
+      "answer": [
+        "AQR Capital Management LLC (grew)",
+        "Citadel Advisors LLC (shrank)",
+        "D. E. Shaw & Co. Inc. (shrank)",
+        "Renaissance Technologies LLC (grew)",
+        "Millennium Management LLC (shrank)",
+        "Viking Global Investors LP (shrank)",
+        "Tudor Investment Corp (grew)",
+        "Balyasny Asset Management L.P. (grew)",
+        "Man Group plc (shrank)"
+      ],
+      "unit": "NAME",
+      "sources": [
+        "0000902664-26-002516",
+        "0000902664-26-003485",
+        "0001037389-26-000033",
+        "0001037389-26-000059",
+        "0001103804-26-000004",
+        "0001103804-26-000006",
+        "0001104659-26-062472",
+        "0001104659-26-062477",
+        "0001104659-26-097200",
+        "0001104659-26-097217",
+        "0001167557-26-000115",
+        "0001167557-26-000226",
+        "0001193125-26-226359",
+        "0001193125-26-351940",
+        "0001273087-26-000004",
+        "0001273087-26-000007",
+        "0001637460-26-000002",
+        "0001637460-26-000003"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1809,
+      "completion_tokens": 214,
+      "trace": {
+        "question": "Which manager held Tesla in both 2026 Q1 and 2026 Q2, and did the position grow or shrink?",
+        "out_of_scope": null,
+        "terms": [
+          "tesla"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "88160R101",
+            "name": "TESLA INC",
+            "title_of_class": "COM",
+            "rows": 84
+          },
+          {
+            "cusip": "872381108",
+            "name": "TELA BIO INC",
+            "title_of_class": "COM",
+            "rows": 2
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT f.fund_name || ' (' || CASE WHEN sum(CASE WHEN h.report_quarter = '2026Q2' THEN h.ssh_prnamt ELSE 0 END) > sum(CASE WHEN h.report_quarter = '2026Q1' THEN h.ssh_prnamt ELSE 0 END) THEN 'grew' ELSE 'shrank' END || ')' AS answer, list(DISTINCT f.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('88160R101') AND h.put_call IS NULL AND h.report_quarter IN ('2026Q1', '2026Q2') GROUP BY f.fund_name HAVING count(DISTINCT h.report_quarter) = 2\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "AQR Capital Management LLC (grew)",
+            [
+              "0001167557-26-000226",
+              "0001167557-26-000115"
+            ]
+          ],
+          [
+            "Citadel Advisors LLC (shrank)",
+            [
+              "0001104659-26-062477",
+              "0001104659-26-097200"
+            ]
+          ],
+          [
+            "D. E. Shaw & Co. Inc. (shrank)",
+            [
+              "0001104659-26-097217",
+              "0001104659-26-062472"
+            ]
+          ],
+          [
+            "Renaissance Technologies LLC (grew)",
+            [
+              "0001037389-26-000059",
+              "0001037389-26-000033"
+            ]
+          ],
+          [
+            "Millennium Management LLC (shrank)",
+            [
+              "0001273087-26-000004",
+              "0001273087-26-000007"
+            ]
+          ],
+          [
+            "Viking Global Investors LP (shrank)",
+            [
+              "0001103804-26-000006",
+              "0001103804-26-000004"
+            ]
+          ],
+          [
+            "Tudor Investment Corp (grew)",
+            [
+              "0000902664-26-003485",
+              "0000902664-26-002516"
+            ]
+          ],
+          [
+            "Balyasny Asset Management L.P. (grew)",
+            [
+              "0001193125-26-351940",
+              "0001193125-26-226359"
+            ]
+          ],
+          [
+            "Man Group plc (shrank)",
+            [
+              "0001637460-26-000002",
+              "0001637460-26-000003"
+            ]
+          ]
+        ],
+        "row_count": 9,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.04,
+          "model_1": 5631.52,
+          "validate": 5.41,
+          "query": 24.12,
+          "check_result": 0.11,
+          "total": 5663.42
+        }
+      }
+    },
+    {
+      "id": "q3-out-of-scope",
+      "attempt": 0,
+      "passed": true,
+      "expected": null,
+      "answer": null,
+      "unit": "NONE",
+      "sources": [],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "trace": {
+        "question": "What was the average portfolio value across all managers in 2026 Q3?",
+        "out_of_scope": "the dataset holds only 2026Q1 and 2026Q2; the question asks only about 2026Q3",
+        "terms": [],
+        "funds": [],
+        "issuers": [],
+        "lookups": [],
+        "sql": null,
+        "rejected": [],
+        "model_calls": 0,
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "error": null,
+        "timings_ms": {
+          "total": 0.1
+        }
+      }
+    },
+    {
+      "id": "bridgewater-entries-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": 997,
+      "answer": 997,
+      "unit": "COUNT",
+      "sources": [
+        "0001350694-26-000003"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 4016,
+      "completion_tokens": 155,
+      "trace": {
+        "question": "How many information table entries did Bridgewater Associates LP report in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "information",
+          "table",
+          "entries",
+          "bridgewater",
+          "associates"
+        ],
+        "funds": [
+          "Bridgewater Associates LP"
+        ],
+        "issuers": [
+          {
+            "cusip": "G5701H122",
+            "name": "LONG   TABLE  GROWTH      CORP",
+            "title_of_class": "UNIT      05/29/2031",
+            "rows": 1
+          },
+          {
+            "cusip": "45675Y104",
+            "name": "INFORMATION SVCS GROUP INC",
+            "title_of_class": "COM",
+            "rows": 21
+          },
+          {
+            "cusip": "14808P109",
+            "name": "CASS INFORMATION SYS INC",
+            "title_of_class": "COM",
+            "rows": 20
+          },
+          {
+            "cusip": "31620M106",
+            "name": "FIDELITY NATL INFORMATION SV",
+            "title_of_class": "COM",
+            "rows": 56
+          },
+          {
+            "cusip": "860372101",
+            "name": "STEWART INFORMATION SVCS COR",
+            "title_of_class": "COM",
+            "rows": 23
+          },
+          {
+            "cusip": "92204A702",
+            "name": "VANGUARD WORLD FD",
+            "title_of_class": "INF TECH ETF",
+            "rows": 16
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT sum(f.table_entry_total) AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f WHERE f.fund_name = 'Bridgewater Associates LP' AND f.report_quarter = '2026Q2'\nLIMIT 1000",
+        "rejected": [
+          "BinderException: Binder Error: column \"table_entry_total\" must appear in the GROUP BY clause or must be part of an aggregate function. Fix it in one of two ways: wrap table_entry_total in an aggregate such as any_value(table_entry_total) or max(table_entry_total), or add table_entry_total to GROUP BY. A scalar answer is one row, so the aggregate is usually the right fix. A query with list(DISTINCT accession_number) or another aggregate may select only grouped columns and aggregates."
+        ],
+        "model_calls": 2,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            997,
+            [
+              "0001350694-26-000003"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 3.05,
+          "model_1": 3586.52,
+          "failed_1": 2.61,
+          "model_2": 2306.02,
+          "validate": 3.78,
+          "query": 6.95,
+          "check_result": 0.08,
+          "total": 5909.08
+        }
+      }
+    },
+    {
+      "id": "apple-total-direct-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": 11853484571,
+      "answer": 11853484571,
+      "unit": "USD",
+      "sources": [
+        "0000902664-26-003485",
+        "0001037389-26-000059",
+        "0001104659-26-097200",
+        "0001104659-26-097217",
+        "0001167557-26-000226",
+        "0001193125-26-351940",
+        "0001273087-26-000007",
+        "0001350694-26-000003",
+        "0001637460-26-000003"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1803,
+      "completion_tokens": 88,
+      "trace": {
+        "question": "What was the total value of Apple shares held directly by all managers in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "apple"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "037833100",
+            "name": "APPLE INC",
+            "title_of_class": "COM",
+            "rows": 85
+          },
+          {
+            "cusip": "03784Y200",
+            "name": "APPLE HOSPITALITY REIT INC",
+            "title_of_class": "COM NEW",
+            "rows": 26
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT sum(h.value) AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h WHERE h.cusip IN ('037833100') AND h.report_quarter = '2026Q2' AND h.put_call IS NULL\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            11853484571,
+            [
+              "0001104659-26-097217",
+              "0001273087-26-000007",
+              "0000902664-26-003485",
+              "0001037389-26-000059",
+              "0001193125-26-351940",
+              "0001350694-26-000003",
+              "0001637460-26-000003",
+              "0001104659-26-097200",
+              "0001167557-26-000226"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.25,
+          "model_1": 5178.23,
+          "validate": 3.95,
+          "query": 15.11,
+          "check_result": 0.18,
+          "total": 5199.85
+        }
+      }
+    },
+    {
+      "id": "alphabet-c-most-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "D. E. Shaw & Co. Inc.",
+      "answer": "D. E. Shaw & Co. Inc.",
+      "unit": "NAME",
+      "sources": [
+        "0001104659-26-097217"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1861,
+      "completion_tokens": 120,
+      "trace": {
+        "question": "Which manager held the most Alphabet Class C shares in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "alphabet"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "02079K305",
+            "name": "ALPHABET INC",
+            "title_of_class": "CAP STK CL A",
+            "rows": 96
+          },
+          {
+            "cusip": "02079K107",
+            "name": "ALPHABET INC",
+            "title_of_class": "CAP STK CL C",
+            "rows": 82
+          },
+          {
+            "cusip": "02079K404",
+            "name": "ALPHABET INC",
+            "title_of_class": "DEP SHS RP1/20 A",
+            "rows": 6
+          },
+          {
+            "cusip": "02079K602",
+            "name": "ALPHABET INC",
+            "title_of_class": "DEP SHS RP1/20 B",
+            "rows": 5
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT f.fund_name AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('02079K107') AND h.report_quarter = '2026Q2' AND h.put_call IS NULL GROUP BY f.fund_name ORDER BY sum(h.ssh_prnamt) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "D. E. Shaw & Co. Inc.",
+            [
+              "0001104659-26-097217"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.74,
+          "model_1": 1797.31,
+          "validate": 5.72,
+          "query": 19.69,
+          "check_result": 0.14,
+          "total": 1825.74
+        }
+      }
+    },
+    {
+      "id": "bridgewater-brkb-q1",
+      "attempt": 0,
+      "passed": true,
+      "expected": "no",
+      "answer": "no",
+      "unit": "NONE",
+      "sources": [
+        "0001350694-26-000002"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1813,
+      "completion_tokens": 133,
+      "trace": {
+        "question": "Did Bridgewater Associates hold Berkshire Hathaway Class B shares in 2026 Q1?",
+        "out_of_scope": null,
+        "terms": [
+          "bridgewater",
+          "associates",
+          "berkshire",
+          "hathaway"
+        ],
+        "funds": [
+          "Bridgewater Associates LP"
+        ],
+        "issuers": [
+          {
+            "cusip": "084670702",
+            "name": "BERKSHIRE HATHAWAY INC DEL",
+            "title_of_class": "CL B NEW",
+            "rows": 70
+          },
+          {
+            "cusip": "084670108",
+            "name": "BERKSHIRE HATHAWAY INC DEL",
+            "title_of_class": "CL A",
+            "rows": 6
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT CASE WHEN count(h.cusip) > 0 THEN 'yes' ELSE 'no' END AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f LEFT JOIN holdings h ON h.accession_number = f.accession_number AND h.cusip IN ('084670702') AND h.put_call IS NULL WHERE f.fund_name = 'Bridgewater Associates LP' AND f.report_quarter = '2026Q1'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "no",
+            [
+              "0001350694-26-000002"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.75,
+          "model_1": 1862.56,
+          "validate": 5.17,
+          "query": 7.47,
+          "check_result": 0.08,
+          "total": 1878.09
+        }
+      }
+    },
+    {
+      "id": "viking-tesla-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "yes",
+      "answer": "yes",
+      "unit": "NONE",
+      "sources": [
+        "0001103804-26-000006"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1796,
+      "completion_tokens": 134,
+      "trace": {
+        "question": "Did Viking Global Investors hold Tesla shares in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "viking",
+          "global",
+          "investors",
+          "tesla"
+        ],
+        "funds": [
+          "Viking Global Investors LP"
+        ],
+        "issuers": [
+          {
+            "cusip": "88160R101",
+            "name": "TESLA INC",
+            "title_of_class": "COM",
+            "rows": 84
+          },
+          {
+            "cusip": "872381108",
+            "name": "TELA BIO INC",
+            "title_of_class": "COM",
+            "rows": 2
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT CASE WHEN count(h.cusip) > 0 THEN 'yes' ELSE 'no' END AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f LEFT JOIN holdings h ON h.accession_number = f.accession_number AND h.cusip IN ('88160R101') AND h.put_call IS NULL WHERE f.fund_name = 'Viking Global Investors LP' AND f.report_quarter = '2026Q2'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "yes",
+            [
+              "0001103804-26-000006"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 1.94,
+          "model_1": 1541.17,
+          "validate": 6.64,
+          "query": 10.25,
+          "check_result": 0.09,
+          "total": 1560.15
+        }
+      }
+    },
+    {
+      "id": "nvidia-holders-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": 11,
+      "answer": 11,
+      "unit": "COUNT",
+      "sources": [
+        "0000902664-26-003485",
+        "0000919574-26-005427",
+        "0000919574-26-005520",
+        "0001037389-26-000059",
+        "0001104659-26-097200",
+        "0001104659-26-097217",
+        "0001167557-26-000226",
+        "0001193125-26-351940",
+        "0001273087-26-000007",
+        "0001350694-26-000003",
+        "0001637460-26-000003"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1779,
+      "completion_tokens": 101,
+      "trace": {
+        "question": "How many managers in the roster held Nvidia shares directly in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "nvidia"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "67066G104",
+            "name": "NVIDIA CORPORATION",
+            "title_of_class": "COM",
+            "rows": 95
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT count(DISTINCT f.fund_name) AS answer, list(DISTINCT f.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('67066G104') AND h.put_call IS NULL AND f.report_quarter = '2026Q2'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            11,
+            [
+              "0001637460-26-000003",
+              "0001104659-26-097200",
+              "0001273087-26-000007",
+              "0001037389-26-000059",
+              "0001350694-26-000003",
+              "0000919574-26-005427",
+              "0001167557-26-000226",
+              "0000919574-26-005520",
+              "0000902664-26-003485",
+              "0001104659-26-097217",
+              "0001193125-26-351940"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 1.61,
+          "model_1": 916.82,
+          "validate": 5.0,
+          "query": 13.06,
+          "check_result": 0.12,
+          "total": 936.68
+        }
+      }
+    },
+    {
+      "id": "tesla-puts-q2",
+      "attempt": 0,
+      "passed": false,
+      "expected": [
+        "Balyasny Asset Management L.P.",
+        "Citadel Advisors LLC",
+        "D. E. Shaw & Co. Inc.",
+        "Man Group plc",
+        "Millennium Management LLC",
+        "Point72 Asset Management L.P.",
+        "Tudor Investment Corp"
+      ],
+      "answer": [
+        "Balyasny Asset Management L.P.",
+        "D. E. Shaw & Co., Inc.",
+        "CITADEL ADVISORS LLC",
+        "Man Group plc",
+        "Point72 Asset Management, L.P.",
+        "MILLENNIUM MANAGEMENT LLC",
+        "TUDOR INVESTMENT CORP ET AL"
+      ],
+      "unit": "NAME",
+      "sources": [
+        "0000902664-26-003485",
+        "0000919574-26-005520",
+        "0001104659-26-097200",
+        "0001104659-26-097217",
+        "0001193125-26-351940",
+        "0001273087-26-000007",
+        "0001637460-26-000003"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1795,
+      "completion_tokens": 111,
+      "trace": {
+        "question": "Which managers held Tesla put options in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "tesla"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "88160R101",
+            "name": "TESLA INC",
+            "title_of_class": "COM",
+            "rows": 84
+          },
+          {
+            "cusip": "872381108",
+            "name": "TELA BIO INC",
+            "title_of_class": "COM",
+            "rows": 2
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT f.filing_manager AS answer, list(DISTINCT f.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('88160R101') AND upper(h.put_call) = 'PUT' AND f.report_quarter = '2026Q2' GROUP BY f.filing_manager\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "Balyasny Asset Management L.P.",
+            [
+              "0001193125-26-351940"
+            ]
+          ],
+          [
+            "D. E. Shaw & Co., Inc.",
+            [
+              "0001104659-26-097217"
+            ]
+          ],
+          [
+            "CITADEL ADVISORS LLC",
+            [
+              "0001104659-26-097200"
+            ]
+          ],
+          [
+            "Man Group plc",
+            [
+              "0001637460-26-000003"
+            ]
+          ],
+          [
+            "Point72 Asset Management, L.P.",
+            [
+              "0000919574-26-005520"
+            ]
+          ],
+          [
+            "MILLENNIUM MANAGEMENT LLC",
+            [
+              "0001273087-26-000007"
+            ]
+          ],
+          [
+            "TUDOR INVESTMENT CORP ET AL",
+            [
+              "0000902664-26-003485"
+            ]
+          ]
+        ],
+        "row_count": 7,
+        "error": null,
+        "timings_ms": {
+          "resolve": 1.85,
+          "model_1": 3962.76,
+          "validate": 5.89,
+          "query": 18.52,
+          "check_result": 0.13,
+          "total": 3989.28
+        }
+      }
+    },
+    {
+      "id": "deshaw-value-change",
+      "attempt": 0,
+      "passed": true,
+      "expected": 43893447926,
+      "answer": 43893447926,
+      "unit": "USD",
+      "sources": [
+        "0001104659-26-062472",
+        "0001104659-26-097217"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1792,
+      "completion_tokens": 134,
+      "trace": {
+        "question": "By how much did D. E. Shaw & Co. Inc.'s total reported portfolio value change from 2026 Q1 to 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "shaw"
+        ],
+        "funds": [
+          "D. E. Shaw & Co. Inc."
+        ],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT sum(CASE WHEN report_quarter = '2026Q2' THEN table_value_total ELSE 0 END) - sum(CASE WHEN report_quarter = '2026Q1' THEN table_value_total ELSE 0 END) AS answer, list(DISTINCT accession_number) AS accession_number FROM filings WHERE fund_name = 'D. E. Shaw & Co. Inc.' AND report_quarter IN ('2026Q1', '2026Q2')\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            43893447926,
+            [
+              "0001104659-26-062472",
+              "0001104659-26-097217"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.44,
+          "model_1": 2299.89,
+          "validate": 4.6,
+          "query": 7.5,
+          "check_result": 0.12,
+          "total": 2312.66
+        }
+      }
+    },
+    {
+      "id": "most-rows-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "AQR Capital Management LLC",
+      "answer": "AQR CAPITAL MANAGEMENT LLC",
+      "unit": "COUNT",
+      "sources": [
+        "0001167557-26-000226"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1765,
+      "completion_tokens": 89,
+      "trace": {
+        "question": "Which manager reported the most holdings rows in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "rows"
+        ],
+        "funds": [],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT f.filing_manager AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f JOIN holdings h USING (accession_number) WHERE f.report_quarter = '2026Q2' GROUP BY f.filing_manager ORDER BY count(*) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "AQR CAPITAL MANAGEMENT LLC",
+            [
+              "0001167557-26-000226"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.29,
+          "model_1": 1560.99,
+          "validate": 4.93,
+          "query": 28.2,
+          "check_result": 0.09,
+          "total": 1594.64
+        }
+      }
+    },
+    {
+      "id": "citadel-filed-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "2026-08-14",
+      "answer": "2026-08-14",
+      "unit": "DATE",
+      "sources": [
+        "0001104659-26-097200"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1771,
+      "completion_tokens": 70,
+      "trace": {
+        "question": "On what date did Citadel Advisors LLC file its 2026 Q2 13F report?",
+        "out_of_scope": null,
+        "terms": [
+          "date",
+          "citadel"
+        ],
+        "funds": [
+          "Citadel Advisors LLC"
+        ],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT f.filing_date AS answer, f.accession_number FROM filings f WHERE f.fund_name = 'Citadel Advisors LLC' AND f.report_quarter = '2026Q2' LIMIT 1",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "2026-08-14",
+            "0001104659-26-097200"
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.55,
+          "model_1": 1063.65,
+          "validate": 3.63,
+          "query": 3.52,
+          "check_result": 0.11,
+          "total": 1071.51
+        }
+      }
+    },
+    {
+      "id": "situational-cusips-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": 24,
+      "answer": 24,
+      "unit": "COUNT",
+      "sources": [
+        "0000935836-26-000418"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1770,
+      "completion_tokens": 88,
+      "trace": {
+        "question": "How many distinct CUSIPs did Situational Awareness LP report in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "cusips",
+          "situational",
+          "awareness"
+        ],
+        "funds": [
+          "Situational Awareness LP"
+        ],
+        "issuers": [],
+        "lookups": [],
+        "sql": "SELECT count(DISTINCT h.cusip) AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f JOIN holdings h USING (accession_number) WHERE f.fund_name = 'Situational Awareness LP' AND f.report_quarter = '2026Q2'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            24,
+            [
+              "0000935836-26-000418"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 1.36,
+          "model_1": 2138.27,
+          "validate": 4.63,
+          "query": 13.11,
+          "check_result": 0.08,
+          "total": 2157.51
+        }
+      }
+    },
+    {
+      "id": "renaissance-nvdia-typo-q1",
+      "attempt": 0,
+      "passed": true,
+      "expected": 2526948,
+      "answer": 2526948,
+      "unit": "SHARES",
+      "sources": [
+        "0001037389-26-000033"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 1782,
+      "completion_tokens": 123,
+      "trace": {
+        "question": "How many shares of Nvdia did Renaissance Technologies hold directly in 2026 Q1?",
+        "out_of_scope": null,
+        "terms": [
+          "nvdia",
+          "renaissance",
+          "technologies"
+        ],
+        "funds": [
+          "Renaissance Technologies LLC"
+        ],
+        "issuers": [
+          {
+            "cusip": "67066G104",
+            "name": "NVIDIA CORPORATION",
+            "title_of_class": "COM",
+            "rows": 95
+          }
+        ],
+        "lookups": [],
+        "sql": "SELECT sum(h.ssh_prnamt) AS answer, list(DISTINCT f.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE f.fund_name = 'Renaissance Technologies LLC' AND h.cusip IN ('67066G104') AND f.report_quarter = '2026Q1' AND h.put_call IS NULL GROUP BY f.fund_name\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 1,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            2526948,
+            [
+              "0001037389-26-000033"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.67,
+          "model_1": 2181.57,
+          "validate": 4.36,
+          "query": 12.23,
+          "check_result": 0.1,
+          "total": 2201.0
+        }
+      }
+    },
+    {
+      "id": "out-of-scope-2025",
+      "attempt": 0,
+      "passed": true,
+      "expected": null,
+      "answer": null,
+      "unit": "NONE",
+      "sources": [],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "trace": {
+        "question": "What did Citadel Advisors hold at the end of 2025?",
+        "out_of_scope": "the dataset holds only 2026Q1 and 2026Q2; the question asks only about 2025Q1, 2025Q2, 2025Q3, 2025Q4",
+        "terms": [],
+        "funds": [],
+        "issuers": [],
+        "lookups": [],
+        "sql": null,
+        "rejected": [],
+        "model_calls": 0,
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "error": null,
+        "timings_ms": {
+          "total": 0.07
+        }
+      }
+    },
+    {
+      "id": "lookup-google-class-a-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "D. E. Shaw & Co. Inc.",
+      "answer": "D. E. Shaw & Co. Inc.",
+      "unit": "NAME",
+      "sources": [
+        "0001104659-26-097217"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 3786,
+      "completion_tokens": 128,
+      "trace": {
+        "question": "Which manager held the most Google Class A shares in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "google"
+        ],
+        "funds": [],
+        "issuers": [
+          {
+            "cusip": "25461A841",
+            "name": "DIREXION SHARES ETF TRUST",
+            "title_of_class": "DLY GOOGL BUL 2X",
+            "rows": 6
+          }
+        ],
+        "lookups": [
+          {
+            "name": "Alphabet Inc",
+            "funds": [],
+            "issuers": [
+              "02079K305",
+              "02079K107",
+              "02079K404",
+              "02079K602"
+            ]
+          }
+        ],
+        "sql": "SELECT f.fund_name AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('02079K305') AND h.report_quarter = '2026Q2' AND h.put_call IS NULL GROUP BY f.fund_name ORDER BY sum(h.ssh_prnamt) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 2,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "D. E. Shaw & Co. Inc.",
+            [
+              "0001104659-26-097217"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 2.3,
+          "model_1": 766.52,
+          "lookup": 1.79,
+          "model_2": 1812.02,
+          "validate": 5.78,
+          "query": 19.84,
+          "check_result": 0.14,
+          "total": 2608.53
+        }
+      }
+    },
+    {
+      "id": "lookup-msft-largest-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "AQR Capital Management LLC",
+      "answer": "AQR Capital Management LLC",
+      "unit": "NAME",
+      "sources": [
+        "0001167557-26-000226"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 3654,
+      "completion_tokens": 128,
+      "trace": {
+        "question": "Which manager held the largest MSFT position in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "msft"
+        ],
+        "funds": [],
+        "issuers": [],
+        "lookups": [
+          {
+            "name": "Microsoft Corp",
+            "funds": [],
+            "issuers": [
+              "594918104"
+            ]
+          }
+        ],
+        "sql": "SELECT f.fund_name AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('594918104') AND h.report_quarter = '2026Q2' AND h.put_call IS NULL GROUP BY f.fund_name ORDER BY sum(h.ssh_prnamt) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 2,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "AQR Capital Management LLC",
+            [
+              "0001167557-26-000226"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 0.28,
+          "model_1": 747.89,
+          "lookup": 1.88,
+          "model_2": 2204.13,
+          "validate": 4.8,
+          "query": 19.79,
+          "check_result": 0.17,
+          "total": 2979.07
+        }
+      }
+    },
+    {
+      "id": "lookup-facebook-holders-q1",
+      "attempt": 0,
+      "passed": true,
+      "expected": 14,
+      "answer": 14,
+      "unit": "COUNT",
+      "sources": [
+        "0000902664-26-002516",
+        "0000919574-26-003362",
+        "0000919574-26-003476",
+        "0001037389-26-000033",
+        "0001040273-26-000002",
+        "0001103804-26-000004",
+        "0001104659-26-062472",
+        "0001104659-26-062477",
+        "0001167557-26-000115",
+        "0001172661-26-002336",
+        "0001193125-26-226359",
+        "0001273087-26-000004",
+        "0001350694-26-000002",
+        "0001637460-26-000002"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 3663,
+      "completion_tokens": 115,
+      "trace": {
+        "question": "How many managers in the roster held Facebook shares directly in 2026 Q1?",
+        "out_of_scope": null,
+        "terms": [
+          "facebook"
+        ],
+        "funds": [],
+        "issuers": [],
+        "lookups": [
+          {
+            "name": "Meta Platforms Inc",
+            "funds": [],
+            "issuers": [
+              "30303M102"
+            ]
+          }
+        ],
+        "sql": "SELECT count(DISTINCT f.fund_name) AS answer, list(DISTINCT f.accession_number) AS accession_number FROM filings f JOIN holdings h USING (accession_number) WHERE h.cusip IN ('30303M102') AND h.put_call IS NULL AND f.report_quarter = '2026Q1'\nLIMIT 1000",
+        "rejected": [],
+        "model_calls": 2,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            14,
+            [
+              "0001193125-26-226359",
+              "0000919574-26-003362",
+              "0000919574-26-003476",
+              "0000902664-26-002516",
+              "0001637460-26-000002",
+              "0001172661-26-002336",
+              "0001037389-26-000033",
+              "0001104659-26-062477",
+              "0001350694-26-000002",
+              "0001104659-26-062472",
+              "0001040273-26-000002",
+              "0001273087-26-000004",
+              "0001103804-26-000004",
+              "0001167557-26-000115"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 1.67,
+          "model_1": 551.26,
+          "lookup": 1.78,
+          "model_2": 1468.79,
+          "validate": 6.37,
+          "query": 16.14,
+          "check_result": 0.08,
+          "total": 2046.16
+        }
+      }
+    },
+    {
+      "id": "lookup-raytheon-most-q2",
+      "attempt": 0,
+      "passed": true,
+      "expected": "Point72 Asset Management L.P.",
+      "answer": "Point72 Asset Management L.P.",
+      "unit": "SHARES",
+      "sources": [
+        "0000919574-26-005520"
+      ],
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "prompt_tokens": 3656,
+      "completion_tokens": 130,
+      "trace": {
+        "question": "Which manager held the most Raytheon Technologies shares in 2026 Q2?",
+        "out_of_scope": null,
+        "terms": [
+          "raytheon",
+          "technologies"
+        ],
+        "funds": [
+          "Renaissance Technologies LLC"
+        ],
+        "issuers": [],
+        "lookups": [
+          {
+            "name": "RTX Corporation",
+            "funds": [],
+            "issuers": [
+              "75513E101"
+            ]
+          }
+        ],
+        "sql": "SELECT f.fund_name AS answer, list(DISTINCT h.accession_number) AS accession_number FROM holdings h JOIN filings f USING (accession_number) WHERE h.cusip IN ('75513E101') AND h.report_quarter = '2026Q2' AND h.put_call IS NULL GROUP BY f.fund_name ORDER BY sum(h.ssh_prnamt) DESC LIMIT 1",
+        "rejected": [],
+        "model_calls": 2,
+        "columns": [
+          "answer",
+          "accession_number"
+        ],
+        "rows": [
+          [
+            "Point72 Asset Management L.P.",
+            [
+              "0000919574-26-005520"
+            ]
+          ]
+        ],
+        "row_count": 1,
+        "error": null,
+        "timings_ms": {
+          "resolve": 1.08,
+          "model_1": 1184.08,
+          "lookup": 0.74,
+          "model_2": 7607.26,
+          "validate": 6.16,
+          "query": 18.12,
+          "check_result": 0.08,
+          "total": 8817.66
+        }
+      }
+    }
+  ]
+}

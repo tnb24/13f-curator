@@ -11,18 +11,29 @@ The world holds three listed filers and one parent manager:
 
 `bodies()` returns every URL the pipeline requests, mapped to its body.
 `FakeSource` serves them and records each request.
+
+`bodies(quarters)` builds the same world for other report quarters. The last
+quarter has the Q2 shape above: Gamma files a notice and Delta files the
+parent report. Every earlier quarter has the Q1 shape. The official lists
+cover the last quarter and the quarter before it.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from pathlib import Path
 
 LOOKUP_URL = "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{:010d}.json"
+PAGE_URL = "https://data.sec.gov/submissions/{name}"
 ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/"
+LIST_URL = "https://www.sec.gov/files/investment/13flist{year}q{number}{suffix}.txt"
 Q2_LIST_URL = "https://www.sec.gov/files/investment/13flist2026q2-txt.txt"
 Q1_LIST_URL = "https://www.sec.gov/files/investment/13flist2026q1.txt"
+
+DEFAULT_QUARTERS = ("2026Q1", "2026Q2")
+_QUARTER_END = {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}
 
 ROSTER = (
     "fund_name,cik\n"
@@ -51,7 +62,7 @@ class FakeSource:
 
         self.requested.append(url)
         if url not in self._bodies:
-            raise FetchError(f"GET {url} failed (no canned body)")
+            raise FetchError(f"GET {url} failed (no canned body)", status=404)
         return self._bodies[url]
 
 
@@ -158,7 +169,79 @@ def _official(entries: list[tuple[str, str, str]], added: str = "") -> bytes:
     return ("\n".join(lines) + "\n").encode("latin-1")
 
 
-def bodies() -> dict[str, bytes]:
+def _filings_for(quarters: tuple[str, ...]) -> list[tuple]:
+    """The filings of the world for these quarters, in the shape of `_FILINGS`.
+
+    The default quarters give `_FILINGS` itself. Any other quarters reuse its rows:
+    the last quarter copies the Q2 filings, and each earlier one copies the Q1 filings.
+    """
+    if quarters == DEFAULT_QUARTERS:
+        return _FILINGS
+    early = [f for f in _FILINGS if f[4] == "2026-03-31"]
+    late = [f for f in _FILINGS if f[4] == "2026-06-30"]
+    filings: list[tuple] = []
+    for position, quarter in enumerate(quarters, start=1):
+        year, number = int(quarter[:4]), int(quarter[5])
+        report = f"{year}-{_QUARTER_END[number]}"
+        month, day = _QUARTER_END[number].split("-")
+        for offset, (cik, name, _, form, _, _, cover, rows) in enumerate(
+            late if quarter == quarters[-1] else early
+        ):
+            filed = date.fromisoformat(report) + timedelta(days=40 + offset)
+            filings.append((
+                cik, name, f"{cik:010d}-{year % 100:02d}-{position:06d}", form, report,
+                filed.isoformat(), (f"{month}-{day}-{year}", *cover[1:]), rows,
+            ))
+    return filings
+
+
+def list_url(quarter: str, suffix: str = "") -> str:
+    """The URL of one quarter's official list. `suffix` is "" or "-txt"."""
+    return LIST_URL.format(year=quarter[:4], number=quarter[5], suffix=suffix)
+
+
+def move_to_page(
+    served: dict[str, bytes], cik: int, keep: int = 1, decoy: bool = False
+) -> list[str]:
+    """Move all but the newest `keep` filings of one CIK onto an older submissions page.
+
+    The `recent` block then holds fewer than 1000 entries, yet older filings exist.
+    Return the URL of each page that the world serves. With `decoy`, the entry list
+    also names a page that only holds filings from 1999 to 2012. The world serves no
+    body for it, so a request for that page fails.
+    """
+    url = SUBMISSIONS_URL.format(cik)
+    payload = json.loads(served[url])
+    recent = payload["filings"]["recent"]
+    order = sorted(range(len(recent["filingDate"])), key=lambda i: recent["filingDate"][i])
+    older, newest = order[:-keep], order[-keep:]
+    page = {column: [values[i] for i in older] for column, values in recent.items()}
+    payload["filings"]["recent"] = {
+        column: [values[i] for i in newest] for column, values in recent.items()
+    }
+    name = f"CIK{cik:010d}-submissions-001.json"
+    dates = page["filingDate"]
+    entries = [{"name": name, "filingCount": len(dates),
+                "filingFrom": min(dates), "filingTo": max(dates)}]
+    if decoy:
+        entries.append({"name": f"CIK{cik:010d}-submissions-002.json", "filingCount": 40,
+                        "filingFrom": "1999-01-01", "filingTo": "2012-12-31"})
+    payload["filings"]["files"] = entries
+    served[url] = json.dumps(payload).encode()
+    served[PAGE_URL.format(name=name)] = json.dumps(page).encode()
+    return [PAGE_URL.format(name=entry["name"]) for entry in entries]
+
+
+def bodies(
+    quarters: tuple[str, ...] = DEFAULT_QUARTERS, list_suffix: str | None = ""
+) -> dict[str, bytes]:
+    """Every body that a pipeline run for these quarters requests.
+
+    The official lists use the URLs that `curator.cusip_check` knows for 2026Q1
+    and 2026Q2. For any other quarter they use `list_suffix`: "" (the default) or
+    "-txt". None leaves the lists out, as when the SEC has not published them.
+    """
+    table = _filings_for(quarters)
     out: dict[str, bytes] = {
         LOOKUP_URL: (
             "ALPHA CAPITAL LLC:1000001:\n"
@@ -174,19 +257,25 @@ def bodies() -> dict[str, bytes]:
                                    "form": ["ADV"], "reportDate": [""],
                                    "filingDate": ["2026-02-01"], "primaryDocument": ["a.htm"]}},
         }).encode(),
-        Q2_LIST_URL: _official([
-            (APPLE[2], "APPLE INC", "COM"),
-            (NVIDIA[2], "NVIDIA CORPORATION", "COM"),
-            (ACME[2], "ACME WIDGET CO", "COM"),
-        ], added=ACME[2]),
-        Q1_LIST_URL: _official([
-            (APPLE[2], "APPLE INC", "COM"),
-            (NVIDIA[2], "NVIDIA CORP", "COM"),
-            (OLDCO[2], "OLDCO INC", "COM"),
-        ]),
     }
+    current_list = _official([
+        (APPLE[2], "APPLE INC", "COM"),
+        (NVIDIA[2], "NVIDIA CORPORATION", "COM"),
+        (ACME[2], "ACME WIDGET CO", "COM"),
+    ], added=ACME[2])
+    prior_list = _official([
+        (APPLE[2], "APPLE INC", "COM"),
+        (NVIDIA[2], "NVIDIA CORP", "COM"),
+        (OLDCO[2], "OLDCO INC", "COM"),
+    ])
+    last = quarters[-1]
+    before = f"{int(last[:4]) - 1}Q4" if last[5] == "1" else f"{last[:5]}{int(last[5]) - 1}"
+    if list_suffix is not None:
+        known = {"2026Q2": Q2_LIST_URL, "2026Q1": Q1_LIST_URL}
+        out[known.get(last) or list_url(last, list_suffix)] = current_list
+        out[known.get(before) or list_url(before, list_suffix)] = prior_list
     by_cik: dict[int, list] = {}
-    for filing in _FILINGS:
+    for filing in table:
         by_cik.setdefault(filing[0], []).append(filing)
     for cik, filings in by_cik.items():
         out[SUBMISSIONS_URL.format(cik)] = json.dumps({

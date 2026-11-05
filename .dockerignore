@@ -1,11 +1,18 @@
 # The build context needs the code and the published tables, nothing else.
 .git
+.claude
+.agents
+.codex
 .venv
 .cache
+.cache.bak
+.gitignore
 .env
 .env.*
+output.bak
 **/__pycache__
 .pytest_cache
+.test-*
 .ruff_cache
 output/filings
 tests

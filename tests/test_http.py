@@ -56,8 +56,9 @@ def test_a_200_returns_the_body_and_sends_the_contact_header(sleeps) -> None:
 
 def test_a_404_fails_at_once(sleeps) -> None:
     server = Server((404, {}, b""))
-    with pytest.raises(FetchError, match=r"after 1 attempts .status 404"):
+    with pytest.raises(FetchError, match=r"after 1 attempts .status 404") as caught:
         _fetcher(server).get("https://example.test/missing")
+    assert caught.value.status == 404  # a caller can tell a missing file from a failure
     assert sleeps == []
 
 
@@ -82,8 +83,9 @@ def test_a_transport_error_is_retried(sleeps) -> None:
 
 def test_every_attempt_failing_raises_with_the_last_status(sleeps) -> None:
     server = Server(*[(500, {}, b"")] * 5)
-    with pytest.raises(FetchError, match=r"after 5 attempts .status 500"):
+    with pytest.raises(FetchError, match=r"after 5 attempts .status 500") as caught:
         _fetcher(server).get("https://example.test/a")
+    assert caught.value.status == 500
     assert len(server.requests) == 5
 
 
@@ -151,3 +153,13 @@ def test_the_manifest_is_sorted_and_has_fixed_fields(tmp_path) -> None:
                                       "elapsed_seconds": 0.123}
     assert set(document["run"]) == {"started_at", "elapsed_seconds", "requests",
                                     "cache_hits", "cache_misses", "bytes_downloaded"}
+    assert "scope" not in document  # recorded only when the caller passes a scope
+
+
+def test_the_manifest_records_the_scope_between_the_run_and_the_entries(tmp_path) -> None:
+    manifest = Manifest()
+    manifest.record("https://a", True, 1, 0.0)
+    manifest.write(tmp_path / "manifest.json", {"quarters": ["2026Q1"]})
+    document = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert list(document) == ["run", "scope", "entries"]
+    assert document["scope"] == {"quarters": ["2026Q1"]}

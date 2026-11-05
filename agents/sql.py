@@ -1,20 +1,29 @@
-"""The one model call: question in, candidate SQL out.
+"""The model call: question in, candidate SQL out.
 
 `generate` asks the model for a flat JSON object -- `agents/llm.py` warns that
 nesting lowers quality -- and re-checks the parsed object in Python, because
 guided decoding may be inactive on a development endpoint. The system prompt is
 identical on every call, so a repair call keeps the prefix cacheable.
+
+A reply is one of two objects:
+
+    {"sql": "...", "unit": "...", "result_shape": "..."}    the statement
+    {"lookup": ["Alphabet Inc", ...]}                       names to resolve first
+
+The agent resolves each name in the lookup with the same index, and calls the
+model again with `lookups`. A call with `allow_lookup=False` offers the
+statement schema only.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
-from agents.prompts import SYSTEM_PROMPT, build_user_prompt
-from agents.resolve import Issuer
+from agents.prompts import build_user_prompt, system_prompt
+from agents.resolve import MAX_LOOKUP_CHARS, MAX_LOOKUP_NAMES, Issuer, Lookup
 
 # The model call: messages in, the reply text out. agents.llm.complete is the
 # live one; the tests pass a function that returns a fixed reply.
@@ -34,6 +43,18 @@ GENERATION_SCHEMA = {
     },
     "required": ["sql", "unit", "result_shape"],
 }
+
+LOOKUP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "lookup": {"type": "array", "items": {"type": "string"},
+                   "minItems": 1, "maxItems": MAX_LOOKUP_NAMES},
+    },
+    "required": ["lookup"],
+}
+
+# The first call may take either reply. A call after a lookup takes a statement only.
+REPLY_SCHEMA = {"anyOf": [GENERATION_SCHEMA, LOOKUP_SCHEMA]}
 
 _UNITS = frozenset(GENERATION_SCHEMA["properties"]["unit"]["enum"])
 _SHAPES = frozenset(GENERATION_SCHEMA["properties"]["result_shape"]["enum"])
@@ -124,27 +145,65 @@ def _check_shape(response: Any) -> None:
         )
 
 
+def _check_lookup(names: Any) -> list[str]:
+    """Return the names of a lookup reply, cleaned. Raise AgentError for a bad list.
+
+    A name is cut at MAX_LOOKUP_CHARS and a list at MAX_LOOKUP_NAMES. The agent
+    echoes a name into the next prompt, so the limits keep that prompt small.
+    An angle bracket becomes a space: no legal name has one, and a name must
+    not close the <looked_up_names> block.
+    """
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        raise AgentError(f"model field 'lookup' holds {names!r}, expected a list of strings")
+    cleaned = list(dict.fromkeys(
+        " ".join(name.replace("<", " ").replace(">", " ").split())[:MAX_LOOKUP_CHARS]
+        for name in names
+    ))
+    cleaned = [name for name in cleaned if name][:MAX_LOOKUP_NAMES]
+    if not cleaned:
+        raise AgentError("model field 'lookup' holds no name")
+    return cleaned
+
+
 def generate(
     question: str,
     funds: list[str],
     issuers: list[Issuer],
     complete: Complete,
     error: str | None = None,
+    lookups: Sequence[Lookup] = (),
+    allow_lookup: bool = False,
+    previous: str | None = None,
+    *,
+    quarters: Sequence[str],
 ) -> dict:
-    """Return {"sql", "unit", "result_shape"} for one question.
+    """Return {"sql", "unit", "result_shape"}, or {"lookup": [name, ...]}, for one question.
 
-    `error` carries the validator message on a repair call. It goes into the
-    user message only; the system prompt never changes between calls.
+    `error` carries the rejection message on a repair call, and `previous` the
+    statement that it rejected: the model cannot fix a statement that it does
+    not see. `lookups` are the resolved names that the model asked for earlier.
+    All three go into the user message only; the system prompt never changes
+    between calls. A reply with a "sql" key is a statement, even when it also
+    holds a "lookup" key. `quarters` are the report quarters of the dataset,
+    for the system prompt.
     """
-    user = build_user_prompt(question, funds, issuers)
+    user = build_user_prompt(question, funds, issuers, lookups)
     if error:
-        user += f"\n\nYour previous statement was rejected: {error}"
+        if previous:
+            user += f"\n\nYour previous statement:\n{previous.strip()}\n\nIt was rejected: {error}"
+        else:
+            user += f"\n\nYour previous statement was rejected: {error}"
+        if allow_lookup:
+            user += "\nIf a company or fund that you need is missing above, ask for a lookup."
         user += "\nReturn one corrected JSON object."
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt(quarters)},
         {"role": "user", "content": user},
     ]
-    raw = complete(messages, schema=GENERATION_SCHEMA, max_tokens=MAX_TOKENS)
+    schema = REPLY_SCHEMA if allow_lookup else GENERATION_SCHEMA
+    raw = complete(messages, schema=schema, max_tokens=MAX_TOKENS)
     response = _parse_object(raw)
+    if isinstance(response, dict) and "lookup" in response and "sql" not in response:
+        return {"lookup": _check_lookup(response["lookup"])}
     _check_shape(response)
     return response

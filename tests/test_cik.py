@@ -14,6 +14,9 @@ import pytest
 
 from curator import cik
 from curator.cache import FetchError
+from curator.scope import Scope
+
+SCOPE = Scope()  # the default scope: 2026Q1 and 2026Q2, filed by 2026-08-18
 
 _LOOKUP_URL = "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt"
 _SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{:0>10}.json"
@@ -102,7 +105,7 @@ def test_a_collision_needs_the_13f_test(tmp_path):
     cache = _fake_cache(tmp_path)
     roster = [{"fund_name": "Baupost Group LLC/MA", "cik": _FILER_CIK}]
 
-    records = cik.resolve_filers(roster, cache)
+    records = cik.resolve_filers(roster, cache, SCOPE)
 
     assert len(records) == 1
     record = records[0]
@@ -113,6 +116,12 @@ def test_a_collision_needs_the_13f_test(tmp_path):
     # Both colliding candidates went through the submissions check.
     assert _SUBMISSIONS_URL.format(int(_NONFILER_CIK)) in cache.requested
     assert _SUBMISSIONS_URL.format(int(_FILER_CIK)) in cache.requested
+
+
+def test_two_names_that_resolve_to_one_filer_are_rejected(tmp_path):
+    roster = [{"fund_name": "Baupost Group LLC/MA"}, {"fund_name": "Baupost Group LLC"}]
+    with pytest.raises(ValueError, match="resolve to the same SEC filer"):
+        cik.resolve_filers(roster, _fake_cache(tmp_path), SCOPE)
 
 
 def _cache_with(root: Path, lookup: str, submissions: dict[str, bytes]) -> FakeCache:
@@ -128,7 +137,7 @@ def _files_13f(name: str) -> bytes:
 def test_an_input_cik_that_names_another_filer_is_corrected_by_name(tmp_path):
     cache = _cache_with(tmp_path, "ALPHA CAPITAL LLC:0000000111:\n",
                         {"0000000111": _files_13f("ALPHA CAPITAL LLC")})
-    record = cik.resolve_filers([{"fund_name": "Alpha Capital LLC", "cik": "999"}], cache)[0]
+    record = cik.resolve_filers([{"fund_name": "Alpha Capital LLC", "cik": "999"}], cache, SCOPE)[0]
     assert (record.cik, record.cik_source) == ("0000000111", "corrected")
 
 
@@ -136,7 +145,7 @@ def test_a_name_with_no_input_cik_resolves(tmp_path):
     cache = _cache_with(tmp_path, "ALPHA CAPITAL LLC:0000000111:\n",
                         {"0000000111": _files_13f("ALPHA CAPITAL LLC")})
     for row in ({"fund_name": "Alpha Capital LLC"}, {"fund_name": "Alpha Capital LLC", "cik": ""}):
-        record = cik.resolve_filers([row], cache)[0]
+        record = cik.resolve_filers([row], cache, SCOPE)[0]
         assert (record.cik, record.cik_source) == ("0000000111", "resolved")
 
 
@@ -148,7 +157,8 @@ def test_the_fuzzy_stage_runs_only_when_no_exact_candidate_files(tmp_path):
         "0000000001": _submissions_body("TUDOR INVESTMENT CORP", ["D"], [""], ["2020-01-01"]),
         "0000000002": _files_13f("TUDOR INVESTMENT CORP ET AL"),
     })
-    record = cik.resolve_filers([{"fund_name": "Tudor Investment Corp", "cik": "1"}], cache)[0]
+    row = {"fund_name": "Tudor Investment Corp", "cik": "1"}
+    record = cik.resolve_filers([row], cache, SCOPE)[0]
     assert record.cik == "0000000002"
     assert record.edgar_name == "TUDOR INVESTMENT CORP ET AL"
 
@@ -158,7 +168,7 @@ def test_no_filing_candidate_raises_and_names_what_it_tried(tmp_path):
         "0000000005": _submissions_body("OMEGA FUND LP", ["D"], [""], ["2020-01-01"]),
     })
     with pytest.raises(LookupError, match=r"0000000005\(100\.0\)"):
-        cik.resolve_filers([{"fund_name": "Omega Fund LP", "cik": "5"}], cache)
+        cik.resolve_filers([{"fund_name": "Omega Fund LP", "cik": "5"}], cache, SCOPE)
 
 
 def test_a_late_filing_does_not_confirm_a_candidate(tmp_path):
@@ -166,7 +176,41 @@ def test_a_late_filing_does_not_confirm_a_candidate(tmp_path):
     late = _submissions_body("LATE LLC", ["13F-HR"], ["2026-06-30"], ["2026-08-19"])
     cache = _cache_with(tmp_path, "LATE LLC:0000000007:\n", {"0000000007": late})
     with pytest.raises(LookupError):
-        cik.resolve_filers([{"fund_name": "Late LLC", "cik": "7"}], cache)
+        cik.resolve_filers([{"fund_name": "Late LLC", "cik": "7"}], cache, SCOPE)
+
+
+def test_a_filing_on_an_older_page_confirms_a_candidate(tmp_path):
+    """`recent` holds no 13F, and the in-scope one sits on an older submissions page."""
+    page_name = "CIK0000000009-submissions-001.json"
+    recent = json.loads(_submissions_body("OLDPAGE LLC", ["ADV"], [""], ["2026-07-01"]))
+    recent["filings"]["files"] = [
+        {"name": page_name, "filingFrom": "2026-01-01", "filingTo": "2026-05-30"},
+        {"name": "CIK0000000009-submissions-002.json",
+         "filingFrom": "2010-01-01", "filingTo": "2025-12-31"},
+    ]
+    page = {"accessionNumber": ["0000000009-26-000001"], "form": ["13F-HR"],
+            "reportDate": ["2026-03-31"], "filingDate": ["2026-05-12"]}
+    cache = _cache_with(tmp_path, "OLDPAGE LLC:0000000009:\n", {"0000000009": b"{}"})
+    cache._bodies[_SUBMISSIONS_URL.format(9)] = json.dumps(recent).encode()
+    cache._bodies["https://data.sec.gov/submissions/" + page_name] = json.dumps(page).encode()
+
+    record = cik.resolve_filers([{"fund_name": "Oldpage LLC", "cik": "9"}], cache, SCOPE)[0]
+
+    assert record.cik == "0000000009"
+    # The page that ends before 2026-03-31 holds no 13F in scope, so it is never read.
+    assert not any("submissions-002" in url for url in cache.requested)
+
+
+def test_the_scope_decides_which_quarter_confirms_a_candidate(tmp_path):
+    body = _submissions_body("ALPHA CAPITAL LLC", ["13F-HR"], ["2025-12-31"], ["2026-02-10"])
+    cache = _cache_with(tmp_path, "ALPHA CAPITAL LLC:0000000111:\n", {"0000000111": body})
+    row = {"fund_name": "Alpha Capital LLC", "cik": "111"}
+    with pytest.raises(LookupError, match=r"periods \('2026-03-31', '2026-06-30'\)"):
+        cik.resolve_filers([row], cache, SCOPE)
+    other = Scope.parse("2025Q4", "2026-02-17")
+    assert cik.resolve_filers([row], cache, other)[0].cik == "0000000111"
+    with pytest.raises(LookupError, match=r"filed by 2026-02-09"):
+        cik.resolve_filers([row], cache, Scope.parse("2025Q4", "2026-02-09"))
 
 
 def test_filers_csv_sorts_by_integer_cik(tmp_path):

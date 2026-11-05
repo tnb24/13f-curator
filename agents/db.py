@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLE_SOURCES = {
@@ -53,6 +55,19 @@ class Result:
 
     columns: list[str]
     rows: list[tuple]
+
+
+def dataset_quarters(sources: dict[str, Path] | None = None) -> tuple[str, ...]:
+    """Return the report quarters in the filings file, ascending, each once.
+
+    The function reads one column of the Parquet file and opens no database. A
+    caller can then check a question against the dataset before it builds an Engine.
+    """
+    path = Path((TABLE_SOURCES if sources is None else sources)["filings"])
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} is missing; run main.py to build the tables")
+    column = pq.read_table(path, columns=["report_quarter"])["report_quarter"]
+    return tuple(sorted(pc.unique(column).drop_null().to_pylist()))
 
 
 def _literal(text: str) -> str:

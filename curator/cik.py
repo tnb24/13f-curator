@@ -19,14 +19,10 @@ import sys
 from pathlib import Path
 
 from curator.cache import Cache, FetchError
+from curator.discover import payload_frames
 from curator.lookup import LookupIndex, normalise
 from curator.records import FilerRecord
-from curator.scope import (
-    FILING_DATE_CUTOFF,
-    IN_SCOPE_FORMS,
-    REPORT_PERIODS,
-    SUBMISSIONS_URL,
-)
+from curator.scope import IN_SCOPE_FORMS, SUBMISSIONS_URL, Scope
 
 __all__ = ["FilerRecord", "load_lookup", "normalise", "resolve_filers", "write_filers_csv"]
 
@@ -34,17 +30,30 @@ _LOOKUP_URL = "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt"
 _EXACT_SCORE = 100.0
 
 
+class RosterError(ValueError):
+    """An input roster cannot represent a unique set of managers."""
+
+
 def load_lookup(cache: Cache) -> LookupIndex:
     """Return SEC's name-to-CIK lookup, normalised, from the raw file."""
     return LookupIndex.from_body(cache.get(_LOOKUP_URL))
 
 
-def resolve_filers(roster: list[dict[str, str]], cache: Cache) -> list[FilerRecord]:
+def resolve_filers(
+    roster: list[dict[str, str]], cache: Cache, scope: Scope
+) -> list[FilerRecord]:
     """Return one FilerRecord per input row, in input order."""
     lookup = load_lookup(cache)
     records: list[FilerRecord] = []
+    seen: dict[str, str] = {}
     for row in roster:
-        record = _resolve_row(row, lookup, cache)
+        record = _resolve_row(row, lookup, cache, scope)
+        if record.cik in seen:
+            raise RosterError(
+                f"{record.fund_name!r} and {seen[record.cik]!r} resolve to the same "
+                f"SEC filer (CIK {record.cik}); remove the duplicate manager"
+            )
+        seen[record.cik] = record.fund_name
         records.append(record)
         print(
             f"curator.cik: {record.fund_name} -> {record.cik} "
@@ -54,18 +63,20 @@ def resolve_filers(roster: list[dict[str, str]], cache: Cache) -> list[FilerReco
     return records
 
 
-def _resolve_row(row: dict[str, str], lookup: LookupIndex, cache: Cache) -> FilerRecord:
+def _resolve_row(
+    row: dict[str, str], lookup: LookupIndex, cache: Cache, scope: Scope
+) -> FilerRecord:
     """Resolve one input row through the exact, confirm, and fuzzy stages."""
     fund_name = row["fund_name"]
     given_cik = str(row.get("cik") or "").strip()
     target = normalise(fund_name)
 
     tried: dict[str, float] = dict.fromkeys(lookup.exact(target), _EXACT_SCORE)
-    passing = _confirm_all(tried, cache)
+    passing = _confirm_all(tried, cache, scope)
 
     if not passing:
         fuzzy = lookup.fuzzy(target)
-        passing = _confirm_all(fuzzy, cache)
+        passing = _confirm_all(fuzzy, cache, scope)
         for cik, score in fuzzy.items():
             tried[cik] = max(tried.get(cik, 0.0), score)
 
@@ -73,7 +84,7 @@ def _resolve_row(row: dict[str, str], lookup: LookupIndex, cache: Cache) -> File
         detail = ", ".join(f"{cik}({score:.1f})" for cik, score in sorted(tried.items()))
         raise LookupError(
             f"{fund_name}: no candidate filed a 13F in scope "
-            f"(periods {REPORT_PERIODS}, filed by {FILING_DATE_CUTOFF}); "
+            f"(periods {scope.report_periods}, filed by {scope.cutoff}); "
             f"candidates tried: {detail or 'none'}"
         )
 
@@ -95,38 +106,44 @@ def _resolve_row(row: dict[str, str], lookup: LookupIndex, cache: Cache) -> File
 def _confirm_all(
     candidates: dict[str, float],
     cache: Cache,
+    scope: Scope,
 ) -> dict[str, tuple[float, str]]:
     """Confirm every candidate. Return the passers with their scores."""
     passing: dict[str, tuple[float, str]] = {}
     for cik, score in candidates.items():
-        in_scope, edgar_name = _submissions(cik, cache)
+        in_scope, edgar_name = _submissions(cik, cache, scope)
         if in_scope:
             passing[cik] = (score, edgar_name)
     return passing
 
 
-def _submissions(cik: str, cache: Cache) -> tuple[bool, str]:
+def _submissions(cik: str, cache: Cache, scope: Scope) -> tuple[bool, str]:
     """Return (files a 13F in scope, entity name) for one zero-padded CIK.
 
     Every response goes through the cache, so discovery reads the same bodies.
+    The check reads the older pages too, as discovery does, so a filer whose
+    in-scope filing sits on an older page still passes.
     """
     try:
         payload = json.loads(cache.get(SUBMISSIONS_URL.format(int(cik))))
     except FetchError:
         return False, ""
     edgar_name = str(payload.get("name") or "")
-    recent = (payload.get("filings") or {}).get("recent") or {}
-    forms = recent.get("form") or []
-    report_dates = recent.get("reportDate") or []
-    filing_dates = recent.get("filingDate") or []
-    for form, report_date, filing_date in zip(forms, report_dates, filing_dates, strict=False):
-        if form not in IN_SCOPE_FORMS:
-            continue
-        if report_date not in REPORT_PERIODS:
-            continue
-        if not filing_date or str(filing_date) > FILING_DATE_CUTOFF:
-            continue
-        return True, edgar_name
+    periods = scope.report_periods
+    for frame in payload_frames(payload, cache, scope):
+        forms = frame.get("form") or []
+        report_dates = frame.get("reportDate") or []
+        filing_dates = frame.get("filingDate") or []
+        for form, report_date, filing_date in zip(
+            forms, report_dates, filing_dates, strict=False
+        ):
+            if form not in IN_SCOPE_FORMS:
+                continue
+            if report_date not in periods:
+                continue
+            if not filing_date or str(filing_date) > scope.cutoff:
+                continue
+            return True, edgar_name
     return False, edgar_name
 
 

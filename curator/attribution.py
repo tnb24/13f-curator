@@ -22,7 +22,7 @@ from curator.download import download
 from curator.parse import ParsedDataset, QualityReport, child_text, parse_filing
 from curator.records import FilingRef
 from curator.schema import ATTRIBUTED_SCHEMA
-from curator.scope import FILING_DATE_CUTOFF
+from curator.scope import Scope
 from curator.write import write_table_atomic
 
 _PARENT_FORMS = ("13F-HR", "13F-HR/A")
@@ -92,13 +92,16 @@ def _sequence_map(cover_path: Path) -> dict[str, dict[str, str | None]]:
     return mapping
 
 
-def _find_parent_ref(cache: Cache, cik: str, report_date: str) -> FilingRef | None:
+def _find_parent_ref(
+    cache: Cache, cik: str, report_date: str, scope: Scope
+) -> FilingRef | None:
     """Find the parent's 13F-HR for the same period through the submissions API.
 
-    The search reads every page of the parent's filing history, as discovery
-    does, so an old parent with more than 1000 filings is still found.
+    The search reads every page of the parent's filing history that can hold the
+    period, as discovery does, so an old parent with more than 1000 filings is
+    still found.
     """
-    frames, name = filing_frames(cache, cik)
+    frames, name = filing_frames(cache, cik, scope)
     for frame in frames:
         columns = zip(
             frame.get("accessionNumber") or [],
@@ -111,7 +114,7 @@ def _find_parent_ref(cache: Cache, cik: str, report_date: str) -> FilingRef | No
         for accession, form, reported, filed, primary in columns:
             if form not in _PARENT_FORMS or reported != report_date:
                 continue
-            if not filed or filed > FILING_DATE_CUTOFF:
+            if not filed or filed > scope.cutoff:
                 continue
             return FilingRef(
                 cik=f"{int(cik):010d}",
@@ -125,7 +128,7 @@ def _find_parent_ref(cache: Cache, cik: str, report_date: str) -> FilingRef | No
     return None
 
 
-def run_attribution(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
+def run_attribution(dataset: ParsedDataset, cache: Cache, output: Path, scope: Scope) -> None:
     """Attribute the notice filer's rows out of the parent filing."""
     output = Path(output)
     # The parent is not in the input list, so its documents must not land under
@@ -156,7 +159,7 @@ def run_attribution(dataset: ParsedDataset, cache: Cache, output: Path) -> None:
             parent_cik = (manager.get("cik") or "").strip()
             if not parent_cik:
                 continue
-            ref = _find_parent_ref(cache, parent_cik, str(notice["report_period"]))
+            ref = _find_parent_ref(cache, parent_cik, str(notice["report_period"]), scope)
             if ref is None:
                 print(
                     f"curator.attribution: no parent 13F-HR for CIK {parent_cik}",
