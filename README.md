@@ -139,10 +139,14 @@ version" is the agent at commit `d262efd`, with the same grader and model.
 | Development citation recall / precision | — | 0.971 / 0.971 |
 
 - The development set shaped the prompt, so its score is optimistic.
-- No result on the held-out set changed the prompt or the code. Twelve questions is
-  a small sample.
+- The original holdout has been evaluated repeatedly and its failures inspected.
+  Twelve questions is a small sample, not a fresh test of the current agent.
 - Scores change between runs, even at temperature 0. Other development runs scored
   68 and 69 of 69.
+
+Earlier three-run evaluations of Llama 3.3 70B and Qwen3 30B-A3B, including
+their traces, methodology and caveats, are in the [evaluation notes](evals/README.md).
+They predate the current agent and do not establish its accuracy with those models.
 
 ### Speed
 
